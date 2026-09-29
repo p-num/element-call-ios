@@ -31,17 +31,9 @@ let package = Package(
         // two exact requirements on one package have no solution, and the failure lands before anything
         // compiles. The upper bound is absurd on purpose; CI builds whatever Package.resolved holds.
         .package(url: "https://github.com/element-hq/compound-design-tokens", "11.0.0" ..< "100.0.0"),
-        // A range as well, and this is where that reasoning was first worked out.
-        //
-        // A library that pins the SDK exactly forces every consumer onto that version, so resolution
-        // fails the moment a host bumps the SDK before this package cuts a release. That is the
-        // release-cadence coupling that ruled out shipping this UI from the Rust repo, and it would be
-        // self-inflicted here.
-        //
-        // The upper bound is absurd on purpose: the SDK's major version is the calendar year, so
-        // `upToNextMajor` would lock hosts out every January. CI builds against one exact version, and
-        // that is what actually gets tested.
-        .package(url: "https://github.com/element-hq/matrix-rust-components-swift", "26.09.01" ..< "100.0.0"),
+        // Use the same Letro SDK source and reviewed version as the host. It
+        // preserves Letro upload, room-marker and verification diagnostic APIs.
+        .package(url: "https://git.postnumber.com/letro/matrix-rust-components-swift", exact: "26.09.22-letro.1"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", exact: "1.19.4")
     ],
     targets: [
