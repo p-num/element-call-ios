@@ -64,21 +64,42 @@ final nonisolated class I420MetalRenderer: NSObject, MTKViewDelegate, @unchecked
     private var presentation = VideoPresentation.fill
     private var isReleased = false
     
-    init?(slot: VideoFrameSlot, onContentSize: @escaping @Sendable (CGSize) -> Void = { _ in }) {
-        guard let device = MTLCreateSystemDefaultDevice(),
-              let commandQueue = device.makeCommandQueue(),
-              let library = try? device.makeLibrary(source: Self.shaderSource, options: nil) else { return nil }
-        let descriptor = MTLRenderPipelineDescriptor()
-        descriptor.vertexFunction = library.makeFunction(name: "i420_vertex")
-        descriptor.fragmentFunction = library.makeFunction(name: "i420_fragment")
-        descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
-        guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+    /// Made once for every tile: per renderer, each tile mounting compiled the shader on the main
+    /// thread, and a scroll mounts a row of tiles at every band edge it crosses.
+    private final class GPU: @unchecked Sendable {
+        let device: MTLDevice
+        let commandQueue: MTLCommandQueue
+        let pipeline: MTLRenderPipelineState
         
+        init?() {
+            guard let device = MTLCreateSystemDefaultDevice(),
+                  let commandQueue = device.makeCommandQueue(),
+                  let library = try? device.makeLibrary(source: I420MetalRenderer.shaderSource, options: nil) else { return nil }
+            let descriptor = MTLRenderPipelineDescriptor()
+            descriptor.vertexFunction = library.makeFunction(name: "i420_vertex")
+            descriptor.fragmentFunction = library.makeFunction(name: "i420_fragment")
+            descriptor.colorAttachments[0].pixelFormat = .bgra8Unorm
+            guard let pipeline = try? device.makeRenderPipelineState(descriptor: descriptor) else { return nil }
+            self.device = device
+            self.commandQueue = commandQueue
+            self.pipeline = pipeline
+        }
+    }
+    
+    private static let gpu = GPU()
+    
+    /// What the view draws with: the one device every renderer shares.
+    static var device: MTLDevice? {
+        gpu?.device
+    }
+    
+    init?(slot: VideoFrameSlot, onContentSize: @escaping @Sendable (CGSize) -> Void = { _ in }) {
+        guard let gpu = Self.gpu else { return nil }
         self.slot = slot
         self.onContentSize = onContentSize
-        self.device = device
-        self.commandQueue = commandQueue
-        self.pipeline = pipeline
+        device = gpu.device
+        commandQueue = gpu.commandQueue
+        pipeline = gpu.pipeline
         super.init()
     }
     

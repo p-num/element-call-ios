@@ -26,13 +26,18 @@ final class TileFullscreenUITests: XCTestCase {
         app = XCUIApplication()
     }
     
-    private func launch(_ arrangement: String) {
-        app.launchArguments = ["-arrangement", arrangement]
+    private func launch(_ fixture: String) {
+        app.launchArguments = ["-fixture", fixture]
         app.launch()
     }
     
     private func tile(_ user: String) -> XCUIElement {
         app.otherElements["elementCall.tile.@\(user):example.com:DEVICE"]
+    }
+    
+    /// A member's *screen*, which is a second tile beside their camera rather than a state of it.
+    private func share(_ user: String) -> XCUIElement {
+        app.otherElements["elementCall.tile.@\(user):example.com:DEVICE/screenShare"]
     }
     
     /// A tile on another page of the strip is still in the hierarchy, just parked a screen's width
@@ -51,31 +56,35 @@ final class TileFullscreenUITests: XCTestCase {
         return Set(tiles.allElementsBoundByAccessibilityElement.filter(\.isHittable).map(\.identifier))
     }
     
-    /// How many tiles a strip page holds is the layout's arithmetic and it is smaller than you would
-    /// guess: an iPhone SE in portrait fits two. So wait for a page rather than for a named member.
-    private func waitForAPage(timeout: TimeInterval = 10) -> Set<String> {
-        let deadline = Date().addingTimeInterval(timeout)
+    /// Scrolls the grid by a swipe on one of its tiles and waits for it to settle: a swipe is a
+    /// flick, and the grid goes on decelerating after the finger has gone. Settled is judged on
+    /// whichever tile is nearest the middle of the screen at each look, not on the swiped one,
+    /// which leaves the hierarchy altogether once it is a viewport away.
+    private func scrollGrid(on element: XCUIElement) {
+        element.swipeUp()
+        let deadline = Date().addingTimeInterval(6)
+        var last: (String, CGRect)?
         while Date() < deadline {
-            let onScreen = tilesOnScreen()
-            if !onScreen.isEmpty {
-                return onScreen
+            Thread.sleep(forTimeInterval: 0.3)
+            guard let middle = tileNearestTheMiddle() else { continue }
+            let now = (middle.identifier, middle.frame)
+            if let last, last.0 == now.0, last.1 == now.1 {
+                return
             }
+            last = now
         }
-        return []
     }
     
-    /// Swipes the strip and waits for the page to actually change, returning what is on screen after.
-    private func pageStrip(from before: Set<String>) -> Set<String> {
-        app.swipeLeft()
-        let deadline = Date().addingTimeInterval(5)
-        var onScreen = before
-        while Date() < deadline {
-            onScreen = tilesOnScreen()
-            if onScreen != before, !onScreen.isEmpty {
-                return onScreen
-            }
-        }
-        return onScreen
+    /// The tile whose centre is nearest the screen's, among the tiles nothing else overlaps: a grid
+    /// row passing under the sticky spotlight is still hittable at its edge, and a double tap at
+    /// its centre lands on the spotlight instead. The recording showed exactly that.
+    private func tileNearestTheMiddle() -> XCUIElement? {
+        let middle = app.frame.midY
+        let frames = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH %@", "elementCall.tile."))
+            .allElementsBoundByAccessibilityElement.filter(\.isHittable).map { ($0.identifier, $0.frame) }
+        let clear = frames.filter { tile in !frames.contains { $0.0 != tile.0 && $0.1.intersects(tile.1) } }
+        guard let nearest = clear.min(by: { abs($0.1.midY - middle) < abs($1.1.midY - middle) }) else { return nil }
+        return app.otherElements[nearest.0]
     }
     
     private var exitButton: XCUIElement {
@@ -113,25 +122,25 @@ final class TileFullscreenUITests: XCTestCase {
         XCTAssertFalse(exitButton.exists)
     }
     
-    /// The stage clamps `currentPage` whenever the page count changes, and full screen is one page.
-    /// Without a guard on that, going full screen from page two silently rewinds the strip to page
-    /// one, and that is where you land coming back.
-    func testTheStripKeepsItsPageAcrossFullScreen() throws {
-        launch("pagedStrip")
-        let firstPage = waitForAPage()
-        XCTAssertFalse(firstPage.isEmpty)
+    /// Full screen changes the stage's frame (the top bar goes, the picture runs under the status
+    /// bar) and a scroller whose viewport grows clamps its offset without asking. Coming back has
+    /// to land where you were, not at the top (spec 003 R63).
+    func testTheGridKeepsItsOffsetAcrossFullScreen() throws {
+        launch("listen_mode")
+        let ours = tile("alice")
+        XCTAssertTrue(ours.waitForExistence(timeout: 5))
+        scrollGrid(on: ours)
+        XCTAssertLessThan(ours.frame.minY, 0, "scrolled: our own tile has gone off the top")
         
-        let secondPage = pageStrip(from: firstPage)
-        XCTAssertNotEqual(firstPage, secondPage, "the strip paged")
-        let left = try app.otherElements[XCTUnwrap(firstPage.subtracting(secondPage).sorted().first)]
-        let chosen = try app.otherElements[XCTUnwrap(secondPage.subtracting(firstPage).sorted().first)]
+        let chosen = try XCTUnwrap(tileNearestTheMiddle())
+        let before = chosen.frame
         
         chosen.doubleTap()
-        XCTAssertTrue(waitForDisappearance(of: left), "went full screen from the second page")
+        XCTAssertTrue(waitForDisappearance(of: ours), "went full screen from the scrolled grid")
         
         chosen.doubleTap()
         XCTAssertTrue(waitUntilHittable(chosen), "back on the stage")
-        XCTAssertEqual(tilesOnScreen(), secondPage, "on the page we left, not rewound to the first one")
+        XCTAssertEqual(chosen.frame.minY, before.minY, accuracy: 2, "at the offset we left, not rewound to the top")
     }
     
     // MARK: - Chrome
@@ -191,7 +200,7 @@ final class TileFullscreenUITests: XCTestCase {
     /// They share a view tree, and the arrangement relies on full screen reporting a single page to
     /// keep the paging gesture out of the way.
     func testPinchingInFullScreenNeitherExitsNorPages() {
-        launch("pagedStrip")
+        launch("listen_mode")
         let bob = tile("bob")
         XCTAssertTrue(bob.waitForExistence(timeout: 10))
         
@@ -208,22 +217,20 @@ final class TileFullscreenUITests: XCTestCase {
     }
     
     /// The other half of the same arrangement: outside full screen the tile's own gestures must not
-    /// have eaten the drag the strip pages with.
-    func testTheStripStillPagesWhenNotFullScreen() {
-        launch("pagedStrip")
-        let firstPage = waitForAPage()
-        XCTAssertFalse(firstPage.isEmpty)
-        
-        let secondPage = pageStrip(from: firstPage)
-        
-        XCTAssertNotEqual(firstPage, secondPage, "the tile's own gestures have not eaten the paging drag")
-        XCTAssertFalse(secondPage.subtracting(firstPage).isEmpty, "and the new page brought tiles with it")
+    /// have eaten the drag the grid scrolls with.
+    func testTheGridStillScrollsWhenNotFullScreen() {
+        launch("listen_mode")
+        let ours = tile("alice")
+        XCTAssertTrue(ours.waitForExistence(timeout: 5))
+        let before = ours.frame
+        scrollGrid(on: ours)
+        XCTAssertLessThan(ours.frame.minY, before.minY - 40, "the tile's own gestures have not eaten the scroll")
     }
     
     /// A `Button` inside the tile has to keep its taps: child gestures beat the parent's, which is
     /// why the tile uses `.gesture` and not `.highPriorityGesture`.
     func testTappingTheFlipButtonDoesNotGoFullScreen() {
-        launch("oneToOne")
+        launch("one_to_one")
         let alice = tile("alice")
         XCTAssertTrue(alice.waitForExistence(timeout: 10))
         let flip = app.buttons["Switch camera"].firstMatch
@@ -237,6 +244,23 @@ final class TileFullscreenUITests: XCTestCase {
         // going away is what tells you the tile took the taps.
         XCTAssertTrue(flip.exists, "the button is still there to be tapped")
         XCTAssertTrue(tile("bob").exists, "still the one-to-one arrangement, not full screen")
+    }
+    
+    /// Our own tile follows the camera button. The harness applies the tap to the view state
+    /// itself, and it used to light the button alone, leaving our tile's picture (and so its flip
+    /// button) where it was. The flip button is drawn only on our own tile with video, so it going
+    /// and coming back is our tile following the camera.
+    func testTheCameraButtonTurnsOurOwnPictureOffAndOn() {
+        launch("one_to_one")
+        XCTAssertTrue(tile("alice").waitForExistence(timeout: 10))
+        let flip = app.buttons["Switch camera"].firstMatch
+        XCTAssertTrue(flip.waitForExistence(timeout: 2))
+        
+        app.buttons["Turn camera off"].tap()
+        XCTAssertTrue(flip.waitForNonExistence(timeout: 2), "our tile lost its picture with the camera")
+        
+        app.buttons["Turn camera on"].tap()
+        XCTAssertTrue(flip.waitForExistence(timeout: 2), "our tile has its picture back")
     }
     
     // MARK: - With a picture in the tile
@@ -263,18 +287,53 @@ final class TileFullscreenUITests: XCTestCase {
     
     // MARK: - Screen share
     
-    func testFullScreenOnASharerKeepsTheirScreen() {
-        launch("screenShare")
-        let frank = tile("frank")
-        XCTAssertTrue(frank.waitForExistence(timeout: 10))
+    /// A sharer is two tiles, and the one you double-tap is the one you get.
+    ///
+    /// This used to be a question of *size*: a big tile swapped a sharer's camera for their screen,
+    /// so going full screen on what looked like their camera showed their screen, and there was no
+    /// way to ask for the camera at all. The tile carries its own stream now, so there is nothing
+    /// left to infer.
+    func testASharerIsTwoTilesAndFullScreenTakesTheOneYouTapped() {
+        launch("screen_share")
+        XCTAssertTrue(share("frank").waitForExistence(timeout: 10))
+        XCTAssertTrue(tile("frank").exists, "his camera is on the stage beside his screen")
         
-        frank.doubleTap()
-        frank.tap()
-        
+        share("frank").doubleTap()
+        share("frank").tap()
         XCTAssertTrue(exitButtonAppears())
-        // The chrome names what you are looking at, and a share says so rather than naming them:
-        // the stream kind followed the spotlight alone until full screen taught it to follow size.
-        XCTAssertTrue(app.staticTexts["(Screen share)"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Frank (Screen share)"].waitForExistence(timeout: 2))
+        
+        share("frank").doubleTap()
+        XCTAssertTrue(tile("frank").waitForExistence(timeout: 3))
+        tile("frank").doubleTap()
+        tile("frank").tap()
+        XCTAssertTrue(exitButtonAppears())
+        XCTAssertTrue(app.staticTexts["Frank"].waitForExistence(timeout: 2), "his camera, named as him")
+    }
+    
+    /// The two tiles are addressable apart rather than collapsing into one element — which is what
+    /// `tilesOnScreen` would silently do while the identifier named only the member, since it
+    /// collects them into a `Set`.
+    func testASharersTwoTilesAreCountedAsTwo() {
+        launch("screen_share")
+        XCTAssertTrue(share("frank").waitForExistence(timeout: 5))
+        let onScreen = tilesOnScreen()
+        XCTAssertTrue(onScreen.contains(share("frank").identifier))
+        XCTAssertTrue(onScreen.contains(tile("frank").identifier))
+    }
+    
+    /// A sharer's camera scrolled out of view must not take their screen with it.
+    ///
+    /// The transport releases a stream, and the stage used to ask it to release a *member*: scrolling
+    /// the camera away therefore unsubscribed the screen filling the spotlight, a few seconds later,
+    /// with a visible re-negotiation to undo. Nothing in-process can see that — the placements are
+    /// all correct — so it takes a running app.
+    func testScrollingAwayASharersCameraLeavesTheirScreenDrawing() {
+        launch("share_on_long_grid")
+        let ours = tile("alice")
+        XCTAssertTrue(ours.waitForExistence(timeout: 5))
+        scrollGrid(on: ours)
+        XCTAssertTrue(share("frank").isHittable, "the hero is still on screen after the scroll")
     }
     
     // MARK: - Helpers

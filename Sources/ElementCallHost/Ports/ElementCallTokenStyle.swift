@@ -118,9 +118,12 @@ public nonisolated struct ElementCallTokenIcons: ElementCallIconRenderingProtoco
                                    textStyle: Self.uiTextStyle(for: textStyle)))
     }
     
+    /// One for the process: it holds every icon Compound has, and making one per lookup was most
+    /// of what a tile's body cost on each frame of a scroll.
+    private static let icons = CompoundIcons()
+    
     private static func image(for icon: ElementCallIcon) -> Image {
-        let icons = CompoundIcons()
-        return switch icon {
+        switch icon {
         case .endCall: icons.endCall
         case .micOn: icons.micOnSolid
         case .micOff: icons.micOffSolid
@@ -130,6 +133,9 @@ public nonisolated struct ElementCallTokenIcons: ElementCallIconRenderingProtoco
         case .shareScreen: icons.shareScreenSolid
         case .volumeOn: icons.volumeOnSolid
         case .volumeOff: icons.volumeOffSolid
+        case .headphones: icons.headphonesSolid
+        // Compound has no Bluetooth glyph yet; design is drawing one.
+        case .bluetooth: icons.headphonesSolid
         case .raisedHand: icons.raisedHandSolid
         case .userProfile: icons.userProfileSolid
         case .overflow: icons.overflowHorizontal
@@ -196,7 +202,7 @@ public nonisolated struct ElementCallTokenAvatars: ElementCallAvatarRenderingPro
     }
     
     public func avatar(userID: String, displayName: String?, avatarURL: URL?, size: ElementCallAvatarSize) -> AnyView {
-        let diameter: CGFloat = size == .thumbnail ? 32 : 96
+        let diameter: CGFloat = size == .thumbnail ? 52 : 96
         let name = displayName ?? userID
         let initial = name.trimmingCharacters(in: .whitespaces)
             .drop { !$0.isLetter && !$0.isNumber }

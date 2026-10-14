@@ -1,69 +1,68 @@
 {
-  "originHash" : "b926b602a717c6702fac0e0ad2e34e3728533bb102a78ee3324cee50af51862a",
-  "pins" : [
+  "pins": [
     {
-      "identity" : "compound-design-tokens",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/compound-design-tokens",
-      "state" : {
-        "revision" : "86c15ef71798581d1e0cc39a7f99e598ad572419",
-        "version" : "11.0.0"
+      "identity": "compound-design-tokens",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/element-hq/compound-design-tokens",
+      "state": {
+        "revision": "86c15ef71798581d1e0cc39a7f99e598ad572419",
+        "version": "11.0.0"
       }
     },
     {
-      "identity" : "matrix-rust-components-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/matrix-rust-components-swift",
-      "state" : {
-        "revision" : "bd4fe022902bb3c3cbeb017cbf60516b6ef7f6f0",
-        "version" : "26.9.8"
+      "identity": "matrix-rust-components-swift",
+      "kind": "remoteSourceControl",
+      "location": "https://git.postnumber.com/letro/matrix-rust-components-swift",
+      "state": {
+        "revision": "1c931ad9230447a463eb63d39b603aea62b0a706",
+        "version": "26.9.22-letro.1"
       }
     },
     {
-      "identity" : "matrix-rust-rtc",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/matrix-rust-rtc",
-      "state" : {
-        "revision" : "9708f0be3615618a82f815e5c767f2fb20a895b0",
-        "version" : "0.3.0-rc.2"
+      "identity": "matrix-rust-rtc",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/element-hq/matrix-rust-rtc",
+      "state": {
+        "revision": "529eacf99fee5403bb6aba67742a50581f327d2a",
+        "version": "0.5.0-rc.4"
       }
     },
     {
-      "identity" : "swift-custom-dump",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-custom-dump",
-      "state" : {
-        "revision" : "4fb9e7cbb4b8f5a7354005db39447f570d6b3e19",
-        "version" : "1.7.3"
+      "identity": "swift-custom-dump",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-custom-dump",
+      "state": {
+        "revision": "4fb9e7cbb4b8f5a7354005db39447f570d6b3e19",
+        "version": "1.7.3"
       }
     },
     {
-      "identity" : "swift-snapshot-testing",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-snapshot-testing",
-      "state" : {
-        "revision" : "59a99c458de4d2dee580529b61b4f78dca7b7fa6",
-        "version" : "1.19.4"
+      "identity": "swift-snapshot-testing",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-snapshot-testing",
+      "state": {
+        "revision": "59a99c458de4d2dee580529b61b4f78dca7b7fa6",
+        "version": "1.19.4"
       }
     },
     {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-syntax",
-      "state" : {
-        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
-        "version" : "603.0.2"
+      "identity": "swift-syntax",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/swiftlang/swift-syntax",
+      "state": {
+        "revision": "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
+        "version": "603.0.2"
       }
     },
     {
-      "identity" : "xctest-dynamic-overlay",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
-      "state" : {
-        "revision" : "d9308ad679143c26a30dec52daefe82f54af2b82",
-        "version" : "1.13.1"
+      "identity": "xctest-dynamic-overlay",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      "state": {
+        "revision": "d9308ad679143c26a30dec52daefe82f54af2b82",
+        "version": "1.13.1"
       }
     }
   ],
-  "version" : 3
+  "version": 3
 }

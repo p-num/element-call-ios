@@ -46,7 +46,7 @@ public nonisolated struct VideoPresentation: Equatable, Sendable {
     }
 }
 
-extension VideoPresentation {
+nonisolated extension VideoPresentation {
     /// The vertex transform that takes the unit quad to where this presentation wants the picture:
     /// rotate upright, mirror if asked, scale to fit or fill, then shift by the pan.
     ///

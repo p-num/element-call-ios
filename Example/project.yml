@@ -22,7 +22,13 @@ targets:
   ElementCallExample:
     type: application
     platform: iOS
-    sources: [ElementCallExample]
+    sources:
+      - ElementCallExample
+      # The layout scenarios the tests pin, bundled as a folder so the catalogue can play the very
+      # same files. Vendored from feature-hq; see AGENTS.md.
+      - path: ../Tests/ElementCallTests/Scenarios
+        type: folder
+        buildPhase: resources
     dependencies:
       - package: ElementCall
         product: ElementCall

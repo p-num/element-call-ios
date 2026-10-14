@@ -25,10 +25,14 @@ final class ElementCallExampleHost {
     enum Presentation {
         case harness(ElementCallScreenContext)
         case live(ElementCallScreenViewModel)
+        /// A real view model over a fake controller carrying a scripted call: the shipping screen,
+        /// with the rosters coming from a scenario file rather than a backend.
+        case scripted(ElementCallScreenViewModel, ElementCallExampleScenarioPlayback)
     }
     
     struct Session {
-        let fixture: ElementCallExampleFixture
+        /// Nil for a scenario.
+        let fixture: ElementCallExampleFixture?
         let presentation: Presentation
         /// What the minimized bar is drawn from. For a `live` session it is the very controller the
         /// screen runs on; for a `harness` one there is no controller behind the screen at all, so
@@ -37,6 +41,13 @@ final class ElementCallExampleHost {
     }
     
     private(set) var session: Session?
+    /// A scenario that did not parse, named with its line, shown on the catalogue rather than
+    /// printed: the package's lint forbids `print`, and a notice on screen is what a person and a
+    /// failure screenshot can both read.
+    private(set) var notice: String?
+    /// The catalogue row last opened, so the list can come back to it: it is unmounted while a call
+    /// is up, and a new list starts at the top.
+    private(set) var lastOpenedRow: String?
     private var cancellables = Set<AnyCancellable>()
     /// Only for a harness session. A live one is asked, below.
     private var isHarnessMinimized = false
@@ -51,16 +62,51 @@ final class ElementCallExampleHost {
         guard let session else { return false }
         switch session.presentation {
         case .harness: return isHarnessMinimized
-        case .live: return !session.controller.isMaximized
+        case .live, .scripted: return !session.controller.isMaximized
+        }
+    }
+    
+    func open(_ scenario: ElementCallExampleScenario) {
+        lastOpenedRow = ElementCallExampleCatalogue.rowID(scenario)
+        cancellables.removeAll()
+        isHarnessMinimized = false
+        notice = nil
+        do {
+            let playback = try ElementCallExampleScenarioPlayback(scenario: scenario.load())
+            let controller = ElementCallController.fake(connection: .connected,
+                                                        room: ElementCallFakeRoom(displayName: scenario.name),
+                                                        connectedAt: .now,
+                                                        call: playback.player.call)
+            controller.actions
+                .sink { [weak self] action in self?.handle(action) }
+                .store(in: &cancellables)
+            let viewModel = ElementCallScreenViewModel(controller: controller)
+            playback.attach(context: viewModel.context, controller: controller)
+            session = Session(fixture: nil,
+                              presentation: .scripted(viewModel, playback),
+                              controller: controller)
+            Task {
+                await playback.start()
+                playback.play()
+            }
+        } catch {
+            notice = "Scenario \(scenario.name) failed to load: \(error)"
         }
     }
     
     func open(_ fixture: ElementCallExampleFixture) {
+        lastOpenedRow = ElementCallExampleCatalogue.rowID(fixture)
         cancellables.removeAll()
         isHarnessMinimized = false
         
         switch fixture.kind {
-        case .connected(let state):
+        case .connected(var state):
+            // A headset cannot be paired with the simulator, so the menu the audio button becomes
+            // with one is reached by asking for it.
+            if ProcessInfo.processInfo.arguments.contains("-headset") {
+                state.audioOutputs = ElementCallPreviewFixtures.headsetAudioOutputs
+                state.audioOutput = state.audioOutputs.first
+            }
             // Built from the view state rather than defaulted, so the name on the bar and the name
             // in the top bar cannot drift apart. They agree today only by coincidence: the fake
             // room and `ElementCallPreviewFixtures.connected` happen to pick the same string.
@@ -70,6 +116,7 @@ final class ElementCallExampleHost {
                 self?.handle(action)
             }
             session = Session(fixture: fixture, presentation: .harness(context), controller: controller)
+            isHarnessMinimized = fixture.opensMinimized
             
         case .connecting(let connection):
             let controller = makeController(connection: connection, room: ElementCallFakeRoom())
@@ -91,7 +138,7 @@ final class ElementCallExampleHost {
         guard let session else { return }
         switch session.presentation {
         case .harness: isHarnessMinimized = false
-        case .live: session.controller.restore()
+        case .live, .scripted: session.controller.restore()
         }
     }
     
@@ -100,6 +147,9 @@ final class ElementCallExampleHost {
     /// with it and takes its publisher along, leaving the subscription inert. `open` clears them.
     func endCall() {
         isHarnessMinimized = false
+        if case .scripted(_, let playback)? = session?.presentation {
+            Task { await playback.stop() }
+        }
         session = nil
     }
     

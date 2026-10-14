@@ -1,0 +1,12 @@
+// The offset and the hero survive rotation and fullscreen. Spec 003 R63, R66, R67.
+0s     viewport 393x734 bottom 34
+0s     A#* M#* B C D E F G H I J K L M N
+1s     swipe-hero next                // show M
+2s     scroll 400
+3s     rotate landscape               // first visible grid tile stays visible (R66); M still shown (R67)
+5s     rotate portrait
+6s     fullscreen H                   // from a scrolled grid
+8s     fullscreen none                // back to the same offset (R63)
+9s     minimize                       // head window + PiP tile only (R52 partial)
+11s    tick                           // two seconds after the tiles unmounted their streams have gone idle and paused
+11s    restore

@@ -28,12 +28,9 @@ struct ElementCallFullscreenChrome: View {
             VStack(spacing: 0) {
                 topRow
                     .padding(.horizontal, 16)
-                    // The rail runs up the trailing edge and is centred, so it reaches into this
-                    // row: without this the flip button sits underneath it.
-                    .padding(.trailing, isLandscape ? ElementCallFloatingControls.clearance : 0)
                 Spacer()
             }
-            ElementCallFloatingControls(context: context, isLandscape: isLandscape)
+            ElementCallFloatingControls(context: context)
         }
     }
     
@@ -50,7 +47,10 @@ struct ElementCallFullscreenChrome: View {
             // the one thing still worth saying is whose picture this is and whether they can be heard.
             HStack(spacing: 4) {
                 style.icons.icon(tile.isMicrophoneMuted ? .micOff : .micOn, size: .xSmall, relativeTo: .bodySM)
-                Text(tile.isScreenSharing ? "(Screen share)" : tile.displayName)
+                // Named as well as labelled, and for the same reason the tile's own pill is: a
+                // share is a tile of its own now, beside its owner's camera, so "(Screen share)"
+                // alone no longer says whose screen you are looking at.
+                Text(tile.isScreenShare ? "\(tile.displayName) (Screen share)" : tile.displayName)
                     .lineLimit(1)
             }
             .font(style.theme.bodySMSemibold)
@@ -76,32 +76,44 @@ struct ElementCallFullscreenChrome: View {
     }
 }
 
-/// The control bar where it floats: along the bottom in portrait, up the trailing edge in landscape.
+/// A full-screen tile's raised hand, drawn by the screen for the reason the chrome is, and below
+/// the chrome's top row so the two never overlap and the badge does not move when a tap raises it.
+struct ElementCallFullscreenHandBadge: View {
+    let position: Int
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ElementCallRaisedHandBadge(position: position)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            // The exit button's 44 pt and the row's spacing.
+            .padding(.top, 44 + 8)
+            Spacer()
+        }
+        .allowsHitTesting(false)
+    }
+}
+
+/// The control bar where it floats: along the bottom, over the stage, in both orientations. The
+/// design draws it there in landscape too, over the spotlight, rather than as a rail up the
+/// trailing edge, which is what this used to do.
 ///
-/// One type rather than the same `HStack`/`VStack` written out in both the ordinary screen and the
+/// One type rather than the same `VStack` written out in both the ordinary screen and the
 /// full-screen chrome, so the two cannot drift and the stage's clearance stays one number.
 struct ElementCallFloatingControls: View {
     @Bindable var context: ElementCallScreenContext
-    let isLandscape: Bool
     
-    /// How far in from the edge it sits. Its thickness is the same either way round, so the stage
-    /// reserves one clearance and does not care which edge it is on.
+    /// How far up from the safe area it sits; the stage keeps the grid's end clear of it.
     static let edgePadding: CGFloat = 12
     static let clearance: CGFloat = ElementCallControlsView.thickness + edgePadding
     
     var body: some View {
-        if isLandscape {
-            HStack(spacing: 0) {
-                Spacer()
-                ElementCallControlsView(context: context, axis: .vertical)
-                    .padding(.trailing, Self.edgePadding)
-            }
-        } else {
-            VStack(spacing: 0) {
-                Spacer()
-                ElementCallControlsView(context: context, axis: .horizontal)
-                    .padding(.bottom, Self.edgePadding)
-            }
+        VStack(spacing: 0) {
+            Spacer()
+            ElementCallControlsView(context: context, axis: .horizontal)
+                .padding(.bottom, Self.edgePadding)
         }
     }
 }
@@ -124,9 +136,15 @@ struct ElementCallFullscreenChrome_Previews: PreviewProvider, TestablePreview {
     static var previews: some View {
         chrome(Fixtures.bob)
             .previewDisplayName("Muted remote")
+        ZStack {
+            chrome(Fixtures.tile("Erin", handPosition: 2))
+            ElementCallFullscreenHandBadge(position: 2)
+        }
+        .environment(\.colorScheme, .dark)
+        .previewDisplayName("Hand raised")
         chrome(Fixtures.tile("Alice", isLocal: true, hasVideo: true))
             .previewDisplayName("Our own camera")
-        chrome(Fixtures.tile("Frank", isScreenSharing: true))
+        chrome(Fixtures.share("Frank"))
             .previewDisplayName("Screen share")
     }
 }

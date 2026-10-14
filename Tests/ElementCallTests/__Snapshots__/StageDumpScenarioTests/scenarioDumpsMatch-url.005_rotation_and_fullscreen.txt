@@ -1,0 +1,204 @@
+== 0s 0s     viewport 393x734 bottom 34
+window ranks 0..<0 also -  composed 1  subscribed 0  spotlight -  fullscreen -
+rank slot      rect                 vis      detail constraints
+-    float br  277,500,100,100      live     -      -
+
+== 0s 0s     A#* M#* B C D E F G H I J K L M N
+window ranks 2..<15 also A#  composed 15  subscribed 8  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    spot      0,0,393,221          live     detail enabled visible 784x448
+1    hidden    -                    released detail disabled hidden auto
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       paused   detail enabled hidden auto
+10   grid 4,1  203,825,175,131      paused   detail enabled hidden auto
+11   grid 5,0  16,967,175,131       paused   detail enabled hidden auto
+12   grid 5,1  203,967,175,131      paused   detail enabled hidden auto
+13   grid 6,0  16,1110,175,131      paused   detail enabled hidden auto
+14   grid 6,1  203,1110,175,131     paused   detail enabled hidden auto
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 1s 1s     swipe-hero next
+window ranks 2..<15 also M#  composed 15  subscribed 8  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      0,0,393,221          live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       paused   detail enabled hidden auto
+10   grid 4,1  203,825,175,131      paused   detail enabled hidden auto
+11   grid 5,0  16,967,175,131       paused   detail enabled hidden auto
+12   grid 5,1  203,967,175,131      paused   detail enabled hidden auto
+13   grid 6,0  16,1110,175,131      paused   detail enabled hidden auto
+14   grid 6,1  203,1110,175,131     paused   detail enabled hidden auto
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 2s 2s     scroll 400
+window ranks 2..<15 also M#  composed 15  subscribed 14  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      0,400,393,221        live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       live     detail enabled visible 352x256
+10   grid 4,1  203,825,175,131      live     detail enabled visible 352x256
+11   grid 5,0  16,967,175,131       live     detail enabled visible 352x256
+12   grid 5,1  203,967,175,131      live     detail enabled visible 352x256
+13   grid 6,0  16,1110,175,131      live     detail enabled visible 352x256
+14   grid 6,1  203,1110,175,131     live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 3s 3s     rotate landscape
+window ranks 2..<11 also M#  composed 10  subscribed 7  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      16,532,529,347       live     detail enabled visible 1056x688
+2    grid 0,0  557,133,161,121      paused   detail enabled hidden 352x256
+3    grid 1,0  557,266,161,121      live     detail enabled visible 320x240
+4    grid 2,0  557,399,161,121      live     detail enabled visible 320x240
+5    grid 3,0  557,532,161,121      live     detail enabled visible 320x240
+6    grid 4,0  557,666,161,121      live     detail enabled visible 320x240
+7    grid 5,0  557,799,161,121      live     detail enabled visible 320x240
+8    grid 6,0  557,932,161,121      live     detail enabled visible 320x240
+9    grid 7,0  557,1065,161,121     paused   detail enabled hidden 352x256
+10   grid 8,0  557,1198,161,121     paused   detail enabled hidden 352x256
+11   hidden    -                    released detail enabled hidden 352x256
+12   hidden    -                    released detail enabled hidden 352x256
+13   hidden    -                    released detail enabled hidden 352x256
+14   hidden    -                    released detail enabled hidden 352x256
+-    hidden    -                    released -      -
+
+== 5s 5s     rotate portrait
+window ranks 2..<15 also M#  composed 15  subscribed 14  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail disabled hidden 784x448
+1    spot      0,286,393,221        live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       live     detail enabled visible 352x256
+10   grid 4,1  203,825,175,131      live     detail enabled visible 352x256
+11   grid 5,0  16,967,175,131       live     detail enabled visible 352x256
+12   grid 5,1  203,967,175,131      live     detail enabled visible 352x256
+13   grid 6,0  16,1110,175,131      live     detail enabled visible 352x256
+14   grid 6,1  203,1110,175,131     live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 6s 6s     fullscreen H
+window ranks 0..<0 also H  composed 1  subscribed 1  spotlight -  fullscreen H
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail disabled hidden 784x448
+1    hidden    -                    released detail enabled hidden 784x448
+2    hidden    -                    released detail enabled hidden 352x256
+3    hidden    -                    released detail enabled hidden 352x256
+4    hidden    -                    released detail enabled hidden 352x256
+5    hidden    -                    released detail enabled hidden 352x256
+6    hidden    -                    released detail enabled hidden 352x256
+7    hidden    -                    released detail enabled hidden 352x256
+8    full      0,286,393,734        live     detail enabled visible 784x1472
+9    hidden    -                    released detail enabled hidden 352x256
+10   hidden    -                    released detail enabled hidden 352x256
+11   hidden    -                    released detail enabled hidden 352x256
+12   hidden    -                    released detail enabled hidden 352x256
+13   hidden    -                    released detail enabled hidden 352x256
+14   hidden    -                    released detail enabled hidden 352x256
+-    hidden    -                    released -      -
+
+== 8s 8s     fullscreen none
+window ranks 2..<15 also M#  composed 15  subscribed 12  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail disabled hidden 784x448
+1    spot      0,286,393,221        live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       live     detail enabled visible 352x256
+10   grid 4,1  203,825,175,131      live     detail enabled visible 352x256
+11   grid 5,0  16,967,175,131       live     detail enabled visible 352x256
+12   grid 5,1  203,967,175,131      live     detail enabled visible 352x256
+13   grid 6,0  16,1110,175,131      paused   detail enabled hidden 352x256
+14   grid 6,1  203,1110,175,131     paused   detail enabled hidden 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 9s 9s     minimize
+window ranks 0..<8 also M#  composed 0  subscribed 12  spotlight -  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail disabled hidden 784x448
+1    hidden    -                    released detail enabled visible 784x448
+2    hidden    -                    released detail enabled visible 352x256
+3    hidden    -                    released detail enabled visible 352x256
+4    hidden    -                    released detail enabled visible 352x256
+5    hidden    -                    released detail enabled visible 352x256
+6    hidden    -                    released detail enabled visible 352x256
+7    hidden    -                    released detail enabled visible 352x256
+8    hidden    -                    released detail enabled visible 352x256
+9    hidden    -                    released detail enabled visible 352x256
+10   hidden    -                    released detail enabled visible 352x256
+11   hidden    -                    released detail enabled visible 352x256
+12   hidden    -                    released detail enabled visible 352x256
+13   hidden    -                    released detail enabled hidden 352x256
+14   hidden    -                    released detail enabled hidden 352x256
+-    hidden    -                    released -      -
+
+== 11s 11s    tick
+window ranks 0..<8 also M#  composed 0  subscribed 0  spotlight -  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden auto
+1    hidden    -                    released detail enabled hidden auto
+2    hidden    -                    released detail enabled hidden auto
+3    hidden    -                    released detail enabled hidden auto
+4    hidden    -                    released detail enabled hidden auto
+5    hidden    -                    released detail enabled hidden auto
+6    hidden    -                    released detail enabled hidden auto
+7    hidden    -                    released detail enabled hidden auto
+8    hidden    -                    released detail enabled hidden auto
+9    hidden    -                    released detail enabled hidden auto
+10   hidden    -                    released detail enabled hidden auto
+11   hidden    -                    released detail enabled hidden auto
+12   hidden    -                    released detail enabled hidden auto
+13   hidden    -                    released detail enabled hidden auto
+14   hidden    -                    released detail enabled hidden auto
+-    hidden    -                    released -      -
+
+== 11s 11s    restore
+window ranks 2..<15 also M#  composed 15  subscribed 12  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden auto
+1    spot      0,286,393,221        live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+8    grid 3,1  203,682,175,131      live     detail enabled visible 352x256
+9    grid 4,0  16,825,175,131       live     detail enabled visible 352x256
+10   grid 4,1  203,825,175,131      live     detail enabled visible 352x256
+11   grid 5,0  16,967,175,131       live     detail enabled visible 352x256
+12   grid 5,1  203,967,175,131      live     detail enabled visible 352x256
+13   grid 6,0  16,1110,175,131      paused   detail enabled hidden auto
+14   grid 6,1  203,1110,175,131     paused   detail enabled hidden auto
+-    grid 0,0  16,253,175,131       live     -      -

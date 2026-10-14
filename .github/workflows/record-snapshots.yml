@@ -78,8 +78,8 @@ jobs:
 
       - name: Commit the images
         run: |
-          git config user.name "Element CI"
-          git config user.email "ci@element.io"
+          git config user.name "ElementBot"
+          git config user.email "android@element.io"
           git add -A Tests/ElementCallTests/__Snapshots__/
           if git diff --cached --quiet; then
             echo "No snapshot changes detected."

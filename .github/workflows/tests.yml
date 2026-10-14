@@ -11,6 +11,19 @@ on:
 
 permissions: {}
 
+# Workflow-level so the package tests and the UI test shards share one copy.
+env:
+  # Snapshot references are pinned to one device and OS: font rendering differs otherwise.
+  # These three must match Tests/ElementCallTests/Support/SnapshotEnvironment.swift, which the
+  # harness reads, and it fails loudly rather than silently if they drift.
+  XCODE_APP: /Applications/Xcode_26.5.app
+  SIMULATOR_NAME: iPhone SE (3rd generation)
+  SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-5
+  SIMULATOR_LABEL: ElementCall Snapshots
+  # Bump to discard the build caches below. The only lever if a restored build ever looks
+  # wrong, and cheaper to reach for than reasoning about whether it is.
+  CACHE_VERSION: '1'
+
 jobs:
   # Which files changed, and can any of them alter what the tests job does? Ten seconds on Linux to
   # decide whether to spend ten minutes on macOS.
@@ -81,18 +94,6 @@ jobs:
       group: ${{ github.ref == 'refs/heads/main' && format('tests-main-{0}', github.sha) || format('tests-{0}', github.ref) }}
       cancel-in-progress: true
 
-    env:
-      # Snapshot references are pinned to one device and OS: font rendering differs otherwise.
-      # These three must match Tests/ElementCallTests/Support/SnapshotEnvironment.swift, which the
-      # harness reads, and it fails loudly rather than silently if they drift.
-      XCODE_APP: /Applications/Xcode_26.5.app
-      SIMULATOR_NAME: iPhone SE (3rd generation)
-      SIMULATOR_RUNTIME: com.apple.CoreSimulator.SimRuntime.iOS-26-5
-      SIMULATOR_LABEL: ElementCall Snapshots
-      # Bump to discard the build cache below. The only lever if a restored build ever looks
-      # wrong, and cheaper to reach for than reasoning about whether it is.
-      CACHE_VERSION: '1'
-
     steps:
       # A plain checkout. The snapshot references are ordinary blobs in the repository, so there
       # is nothing to fetch separately and no filter to run -- see CONTRIBUTING.md for why they must
@@ -140,7 +141,7 @@ jobs:
           key: build-${{ env.CACHE_VERSION }}-${{ env.XCODE_APP }}-${{ hashFiles('Package.resolved') }}
 
       - name: Install tools
-        run: brew install sourcery swiftformat swiftlint xcodegen
+        run: brew install sourcery swiftformat swiftlint
 
       # The package must never reach for the host application's world. SwiftLint carries the rules
       # that enforce it, at error severity, so this failing is the boundary breaking rather than a
@@ -186,24 +187,144 @@ jobs:
             -resultBundlePath Logs/ElementCallTests.xcresult \
             | xcbeautify --renderer github-actions
 
-      # The one thing the package's own tests cannot reach. Everything about a gesture except
-      # whether the touch arrives is covered in-process; a double tap declared correctly that
-      # something above the tile claims first looks identical to a working one from inside, and only
-      # a real touch tells them apart. The harness it drives is a sample app over the port fakes, so
-      # this needs no server and no camera.
-      #
-      # In this job rather than one of its own, so it reuses the simulator created above and the
-      # build cache, and so the pinned device stays duplicated in two workflow files and not three.
+      - name: Zip artifacts
+        if: failure()
+        run: |
+          for bundle in Logs/*.xcresult; do
+            [ -e "$bundle" ] && zip -r "$bundle.zip" "$bundle/"
+          done
+
+      - name: Archive artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        if: failure()
+        with:
+          name: test-results-package
+          path: Logs/*.xcresult.zip
+          retention-days: 1
+          if-no-files-found: ignore
+
+      - name: Upload coverage to Codecov
+        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
+        with:
+          fail_ci_if_error: false
+          token: ${{ secrets.CODECOV_TOKEN }}
+          xcode: true
+          xcode_archive_path: Logs/ElementCallTests.xcresult
+
+  # The one thing the package's own tests cannot reach. Everything about a gesture except whether
+  # the touch arrives is covered in-process; a double tap declared correctly that something above
+  # the tile claims first looks identical to a working one from inside, and only a real touch tells
+  # them apart. The harness it drives is a sample app over the port fakes, so this needs no server
+  # and no camera.
+  #
+  # A job of its own, sharded by test class, because it is the slow part: in one job after the
+  # package tests, 54 tests ran for 18 minutes on top of a second 5-minute build, and the whole run
+  # took half an hour. Each shard pays for its own build and simulator; the wall clock is the
+  # longest shard. The shards are balanced by measured CI times, so a new test class goes in the
+  # lightest one -- a class in no shard is never run, which is what the last step checks.
+  ui-tests:
+    needs: changes
+    if: needs.changes.outputs.relevant == 'true'
+    runs-on: macos-26
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - shard: chrome
+            classes: ChromeVisibilityUITests AudioOutputUITests
+          - shard: fullscreen
+            classes: TileFullscreenUITests MinimizedCallUITests OverflowMenuUITests
+          - shard: stage
+            classes: SmallCallUITests StageScrollUITests ScrollPerformanceUITests RaisedHandUITests
+          # The oldest iOS the package supports, for the chrome's taps only. SwiftUI arbitrates a
+          # tap between a view and its parent differently there: iOS 18 gave the stage a tap on a
+          # tile as well, and the chrome hid and came straight back, which no iOS 26 run could see.
+          # Not a second copy of every shard: this is the class whose gestures overlap the most.
+          - shard: chrome-ios18
+            classes: ChromeVisibilityUITests
+            ios: '18.6'
+    concurrency:
+      group: ${{ github.ref == 'refs/heads/main' && format('ui-tests-{0}-main-{1}', matrix.shard, github.sha) || format('ui-tests-{0}-{1}', matrix.shard, github.ref) }}
+      cancel-in-progress: true
+
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Fail if a UI test class is in no shard
+        env:
+          SHARDED: ChromeVisibilityUITests AudioOutputUITests TileFullscreenUITests MinimizedCallUITests OverflowMenuUITests SmallCallUITests StageScrollUITests ScrollPerformanceUITests RaisedHandUITests
+        run: |
+          missing=0
+          for class in $(sed -nE 's/^(final )?class ([A-Za-z0-9_]+UITests)[: ].*/\2/p' Example/ElementCallExampleUITests/*.swift); do
+            case " $SHARDED " in
+              *" $class "*) ;;
+              *) echo "::error::$class is in no shard of the ui-tests job in tests.yml."; missing=1 ;;
+            esac
+          done
+          exit $missing
+
+      - name: Configure Xcode
+        run: sudo xcode-select -s "$XCODE_APP"
+
+      # The same directory as the package job's cache, under its own key: this job builds the
+      # example project, whose products live in a DerivedData folder the package job never makes.
+      # The shards race to write it on a miss, and the losers only log a warning.
+      - name: Cache build products
+        uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5
+        with:
+          path: ~/Library/Developer/Xcode/DerivedData
+          key: build-ui-${{ env.CACHE_VERSION }}-${{ env.XCODE_APP }}-${{ hashFiles('Package.resolved') }}
+
+      - name: Install tools
+        run: brew install xcodegen
+
+      # The pinned runtime, or for a shard that names an older iOS, the newest of that major the
+      # image has, and the named version downloaded if it has none. Picked before downloading: the
+      # image's older runtimes change under us, and a download costs minutes on every run.
+      - name: Create the simulator
+        id: simulator
+        env:
+          IOS_VERSION: ${{ matrix.ios }}
+        run: |
+          runtime="$SIMULATOR_RUNTIME"
+          if [ -n "$IOS_VERSION" ]; then
+            major="${IOS_VERSION%%.*}"
+            find_runtime() {
+              xcrun simctl list runtimes -j | jq -r --arg v "$major." \
+                '[.runtimes[] | select(.platform == "iOS" and .isAvailable and (.version | startswith($v)))] | last | .identifier // empty'
+            }
+            runtime=$(find_runtime)
+            if [ -z "$runtime" ]; then
+              xcodebuild -downloadPlatform iOS -buildVersion "$IOS_VERSION"
+              runtime=$(find_runtime)
+            fi
+            [ -n "$runtime" ] || { echo "::error::No iOS $major simulator runtime on this image."; exit 1; }
+          fi
+          udid=$(xcrun simctl create "$SIMULATOR_LABEL" "$SIMULATOR_NAME" "$runtime")
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+
       - name: Generate the example project
         working-directory: Example
         run: xcodegen generate
 
+      # Retried, and only here: a real touch on a shared three-core runner is timing-dependent
+      # however a test is written, and these ran about five times slower than on a Mac. The package
+      # tests are not retried, because a flake there has been a real race more than once.
       - name: Run UI tests
+        env:
+          CLASSES: ${{ matrix.classes }}
         run: |
+          only=()
+          for class in $CLASSES; do only+=("-only-testing:ElementCallExampleUITests/$class"); done
           set -o pipefail && xcodebuild test \
             -project Example/ElementCallExample.xcodeproj \
             -scheme ElementCallExample \
             -destination "id=${{ steps.simulator.outputs.udid }}" \
+            "${only[@]}" \
+            -retry-tests-on-failure -test-iterations 3 \
             -resultBundlePath Logs/ElementCallExampleUITests.xcresult \
             | xcbeautify --renderer github-actions
 
@@ -218,15 +339,7 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         if: failure()
         with:
-          name: test-results
+          name: test-results-ui-${{ matrix.shard }}
           path: Logs/*.xcresult.zip
           retention-days: 1
           if-no-files-found: ignore
-
-      - name: Upload coverage to Codecov
-        uses: codecov/codecov-action@fb8b3582c8e4def4969c97caa2f19720cb33a72f # v7.0.0
-        with:
-          fail_ci_if_error: false
-          token: ${{ secrets.CODECOV_TOKEN }}
-          xcode: true
-          xcode_archive_path: Logs/ElementCallTests.xcresult

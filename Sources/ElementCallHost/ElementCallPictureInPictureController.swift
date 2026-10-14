@@ -64,13 +64,13 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     var placeholderProvider: ((String?) -> AnyView)?
     private var pictureInPictureController: AVPictureInPictureController?
     private var stopReason: StopReason?
-    private var attached: (memberID: String, kind: MatrixRTCStreamKind)?
+    private var attached: MatrixRTCTileID?
     private var observationTask: Task<Void, Never>?
     private var automaticStartTask: Task<Void, Never>?
     /// Whether a failed start is worth one more attempt. See ``start()``.
     private var pendingStartRetry = false
-    private weak var call: MatrixRTCCall?
-    private var spotlightProvider: (() -> String?)?
+    private weak var call: MatrixRTCMediaSession?
+    private var spotlightProvider: (() -> (tileID: MatrixRTCTileID?, isExact: Bool))?
     
     override init() {
         super.init()
@@ -100,12 +100,12 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
         }
         videoView.onPixelSizeChange = { [weak self] size in
             guard let self, let call, let attached else { return }
-            call.reportDrawnSize(size, slot: videoView.slot, memberID: attached.memberID, kind: attached.kind)
+            call.reportDrawnSize(size, slot: videoView.slot, memberID: attached.memberID, kind: attached.kind.videoStreamKind)
         }
     }
     
     /// Binds to a call; the spotlight provider is read whenever the call's video state changes.
-    func bind(call: MatrixRTCCall, spotlightProvider: @escaping () -> String?) {
+    func bind(call: MatrixRTCMediaSession, spotlightProvider: @escaping () -> (tileID: MatrixRTCTileID?, isExact: Bool)) {
         self.call = call
         self.spotlightProvider = spotlightProvider
         if pictureInPictureController == nil, AVPictureInPictureController.isPictureInPictureSupported() {
@@ -159,9 +159,10 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     /// goes through `start()`. Both are before the window appears, which is the only time the size
     /// is honoured.
     @discardableResult
-    private func applyPreferredSizeForCurrentSource() -> (memberID: String, kind: MatrixRTCStreamKind)? {
-        let candidate = call?.pictureInPictureCandidate(spotlightMemberID: spotlightProvider?())
-        if let call, let candidate, let aspect = call.videoAspect(memberID: candidate.memberID, kind: candidate.kind) {
+    private func applyPreferredSizeForCurrentSource() -> MatrixRTCTileID? {
+        let spotlight = spotlightProvider?()
+        let candidate = call?.pictureInPictureCandidate(spotlight: spotlight?.tileID, isExact: spotlight?.isExact ?? false)
+        if let call, let candidate, let aspect = call.videoAspect(memberID: candidate.memberID, kind: candidate.kind.videoStreamKind) {
             applyPreferredSize(aspect: aspect)
         } else if candidate == nil {
             // Nobody has video, so the window will show the avatar placeholder. Without this it
@@ -324,25 +325,27 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     
     private func updateVideoSource() {
         guard let call else { return }
-        let candidate = call.pictureInPictureCandidate(spotlightMemberID: spotlightProvider?())
+        let spotlight = spotlightProvider?()
+        let candidate = call.pictureInPictureCandidate(spotlight: spotlight?.tileID, isExact: spotlight?.isExact ?? false)
         if candidate == nil {
-            // Nobody has video: show who we are in the call with instead of a black window.
-            let shown = call.pictureInPicturePlaceholderMemberID(spotlightMemberID: spotlightProvider?())
+            // Nobody has video, or the person named has none: show who we are in the call with
+            // instead of a black window.
+            let shown = call.pictureInPicturePlaceholderMemberID(spotlight: spotlight?.tileID)
             placeholderHost.rootView = placeholderProvider?(shown) ?? AnyView(Color.black)
             placeholderHost.view.isHidden = false
         } else {
             placeholderHost.view.isHidden = true
         }
-        guard candidate?.memberID != attached?.memberID || candidate?.kind != attached?.kind else { return }
+        guard candidate != attached else { return }
         detach()
         guard let candidate else { return }
-        if let aspect = call.videoAspect(memberID: candidate.memberID, kind: candidate.kind) {
+        if let aspect = call.videoAspect(memberID: candidate.memberID, kind: candidate.kind.videoStreamKind) {
             applyPreferredSize(aspect: aspect)
         }
         if candidate.memberID == call.localMemberID {
             call.localVideo.attach(videoView.slot)
         } else {
-            call.attachVideo(videoView.slot, memberID: candidate.memberID, kind: candidate.kind)
+            call.attachVideo(videoView.slot, memberID: candidate.memberID, kind: candidate.kind.videoStreamKind)
         }
         attached = candidate
         logger?.log(.info, "picture in picture showing \(candidate.memberID) (\(candidate.kind))")
@@ -353,7 +356,7 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
         if attached.memberID == call.localMemberID {
             call.localVideo.detach(videoView.slot)
         } else {
-            call.detachVideo(videoView.slot, memberID: attached.memberID, kind: attached.kind)
+            call.detachVideo(videoView.slot, memberID: attached.memberID, kind: attached.kind.videoStreamKind)
         }
         self.attached = nil
         videoView.clear()

@@ -6,7 +6,8 @@
 //
 
 import ElementCall
-import SwiftUI
+import Foundation
+import Synchronization
 
 /// Pushes generated frames into whatever slots the stage has mounted, at something like a call's
 /// frame rate.
@@ -19,19 +20,39 @@ import SwiftUI
 /// Sizes differ by member on purpose. A 16:9 landscape picture full screen on an upright phone is
 /// the case this feature exists for, and a portrait one beside it is the control: whether a border
 /// runs off the edges or has black beside it is the whole question, and one answer is not proof.
-@MainActor
-final class TestPatternVideo {
+///
+/// **Frames are made off the main thread**, as a real call's are: the decoder offers them from its
+/// own task. Generating them on main, on a run loop timer, charged the harness's scroll with work
+/// the app never does, which is the wrong way round for anything measured with it. A dispatch timer
+/// also has no run loop mode to get wrong: a default-mode `Timer` stopped while a touch was being
+/// tracked, and starved the tiles of frames for exactly the length of a gesture.
+final class TestPatternVideo: Sendable {
     private struct Attachment {
         let slot: VideoFrameSlot
-        let size: CGSize
+        let memberID: String
     }
     
-    private var attachments: [UUID: Attachment] = [:]
-    private var timer: Timer?
-    private var phase = 0
+    private struct State {
+        var attachments: [UUID: Attachment] = [:]
+        /// The stage's shape, which our own camera's picture follows.
+        var isLandscape = false
+        /// The last frame made at each width, so a slot that mounts is handed one at once, without
+        /// making another picture on the thread that is mounting it.
+        var latest: [Int: MatrixRTCVideoFrame] = [:]
+        var timer: DispatchSourceTimer?
+        var phase = 0
+    }
+    
+    private let state = Mutex(State())
+    private let queue = DispatchQueue(label: "io.element.call.example.test-pattern", qos: .userInitiated)
     
     /// Landscape unless the member is one of these, so both shapes are on the stage at once.
     private static let portraitMembers = ["@bob:example.com:DEVICE", "@erin:example.com:DEVICE"]
+    /// Ourselves, Alice in every fixture. Our picture is upright in the interface orientation, as a
+    /// real front camera's is, so it is portrait on an upright phone and landscape on its side: the
+    /// floating tile takes that shape (019 R10, R29), and with a fixed shape the harness only ever
+    /// showed one of them.
+    private static let ownMemberID = "@alice:example.com:DEVICE"
     /// Deliberately modest. In a real call every tile is sent a layer that suits the size it is
     /// drawn at, so a strip cell a couple of hundred points wide never receives 720p; handing every
     /// tile a full-size frame is both far more work than the real thing and less like it. Nothing
@@ -48,56 +69,78 @@ final class TestPatternVideo {
         })
     }
     
+    /// The stage turned. Our own picture changes shape on the next frame, as a camera's does.
+    func setLandscape(_ isLandscape: Bool) {
+        state.withLock { $0.isLandscape = isLandscape }
+    }
+    
+    private static func size(for memberID: String, isLandscape: Bool) -> CGSize {
+        if memberID == ownMemberID {
+            return isLandscape ? landscape : portrait
+        }
+        return portraitMembers.contains(memberID) ? portrait : landscape
+    }
+    
     private func attach(_ slot: VideoFrameSlot, memberID: String) {
-        let size = Self.portraitMembers.contains(memberID) ? Self.portrait : Self.landscape
-        attachments[slot.id] = Attachment(slot: slot, size: size)
+        let latest = state.withLock { state in
+            state.attachments[slot.id] = Attachment(slot: slot, memberID: memberID)
+            return state.latest[Int(Self.size(for: memberID, isLandscape: state.isLandscape).width)]
+        }
         // The first frame goes in straight away: a slot mounted mid-animation would otherwise show
         // its avatar until the next tick, which is the very stutter this is here to look for.
-        offerAll()
+        if let latest {
+            slot.offer(latest)
+        } else {
+            queue.async { self.tick(advancing: false) }
+        }
         start()
     }
     
     private func detach(_ slot: VideoFrameSlot) {
-        attachments[slot.id] = nil
-        if attachments.isEmpty {
-            timer?.invalidate()
-            timer = nil
+        state.withLock { state in
+            state.attachments[slot.id] = nil
+            if state.attachments.isEmpty {
+                state.timer?.cancel()
+                state.timer = nil
+            }
         }
     }
     
     /// One frame per distinct size per tick, handed to every slot that wants that size. Frames are
     /// immutable reference types, so sharing one is just a retain, where generating six identical
     /// pictures was six times the work for the same result.
-    private func offerAll() {
+    private func tick(advancing: Bool) {
+        let (attachments, phase, isLandscape) = state.withLock { state in
+            if advancing {
+                state.phase += 8
+            }
+            return (Array(state.attachments.values), state.phase, state.isLandscape)
+        }
         // Keyed by width, which is enough to tell the two sizes apart and saves making CGSize
         // hashable from outside the module that owns it.
         var generated: [Int: MatrixRTCVideoFrame] = [:]
-        for attachment in attachments.values {
-            let width = Int(attachment.size.width)
+        for attachment in attachments {
+            let size = Self.size(for: attachment.memberID, isLandscape: isLandscape)
+            let width = Int(size.width)
             let frame = generated[width] ?? MatrixRTCTestPattern.frame(width: width,
-                                                                       height: Int(attachment.size.height),
+                                                                       height: Int(size.height),
                                                                        phase: phase)
             generated[width] = frame
             attachment.slot.offer(frame)
         }
+        state.withLock { $0.latest.merge(generated) { $1 } }
     }
     
     private func start() {
-        guard timer == nil else { return }
-        // On `.common` rather than the default mode, which is what `Timer.scheduledTimer` installs.
-        // In the default mode the timer stops while the run loop is tracking a touch, so the tile
-        // was starved of frames for exactly the length of a gesture — and a surface that is not
-        // given frames holds its last one, stretched to whatever shape it has reached. That made
-        // the harness look considerably worse than the app it stands in for, which is the one way a
-        // harness can waste more time than it saves.
-        let timer = Timer(timeInterval: 1.0 / 30, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated {
-                guard let self else { return }
-                self.phase += 8
-                self.offerAll()
+        state.withLock { state in
+            guard state.timer == nil else { return }
+            let timer = DispatchSource.makeTimerSource(queue: queue)
+            timer.schedule(deadline: .now(), repeating: .nanoseconds(1_000_000_000 / 30))
+            timer.setEventHandler { [weak self] in
+                self?.tick(advancing: true)
             }
+            timer.resume()
+            state.timer = timer
         }
-        RunLoop.main.add(timer, forMode: .common)
-        self.timer = timer
     }
 }

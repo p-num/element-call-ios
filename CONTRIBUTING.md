@@ -8,8 +8,10 @@ document only records what differs.
 
 ```bash
 brew install swiftformat swiftlint sourcery
-swift build
 ```
+
+Before you push, run what CI runs first: `swiftformat --lint . && swiftlint`. A formatting
+difference fails the run before any test; `swiftformat .` fixes it.
 
 Nothing else. In particular **no `git-lfs`**: the snapshot reference images are ordinary blobs, and
 must stay that way. They lived in Git LFS once, and that made the package unresolvable by any host

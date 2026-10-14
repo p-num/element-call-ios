@@ -88,6 +88,10 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
     private let open: @Sendable () -> VideoFrameStreamBox?
     /// Called when the last tile has gone and the linger elapsed: nobody is drawing this stream.
     private let onIdle: @Sendable () -> Void
+    /// What the linger runs on: the call's clock, so a scenario can step past it. The fifth timer
+    /// the harness has to own, and the one the plan's list missed because it lives here rather
+    /// than on the call.
+    private let clock: any Clock<Duration>
     /// The upright size and frame rate of the decoded frames, about once a second.
     var onVideoInfo: (@Sendable (MatrixRTCVideoInfo) -> Void)?
     private let meter = VideoFrameMeter()
@@ -99,9 +103,12 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
         var lingerTask: Task<Void, Never>?
     }
     
-    init(open: @escaping @Sendable () -> VideoFrameStreamBox?, onIdle: @escaping @Sendable () -> Void) {
+    init(open: @escaping @Sendable () -> VideoFrameStreamBox?,
+         onIdle: @escaping @Sendable () -> Void,
+         clock: any Clock<Duration> = ContinuousClock()) {
         self.open = open
         self.onIdle = onIdle
+        self.clock = clock
     }
     
     func attach(_ slot: VideoFrameSlot) {
@@ -120,8 +127,9 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
             state.slots[slot.id] = nil
             slot.clear()
             guard state.slots.isEmpty, state.lingerTask == nil else { return }
+            let clock = clock
             state.lingerTask = Task { [weak self] in
-                try? await Task.sleep(for: Self.linger)
+                try? await clock.sleep(for: Self.linger)
                 guard !Task.isCancelled else { return }
                 self?.closeIfIdle()
             }

@@ -30,7 +30,7 @@ public nonisolated struct ElementCallOptions: Sendable {
     public var isPictureInPictureEnabled: Bool
     /// How membership is published. Pinned by the host because it has to match the other clients in
     /// the room, and it cannot change once a session has joined.
-    public var elementCallCompatibility: MatrixRTCElementCallCompat
+    public var membershipFormat: MatrixRTCMembershipFormat
     /// Whether the call screen offers its developer affordances, currently the per-tile stats
     /// overlay. That is raw RTP counters in 9pt monospace, so this belongs on whatever a host
     /// already uses to reveal developer surface, never on a feature flag ordinary users carry.
@@ -53,17 +53,26 @@ public nonisolated struct ElementCallOptions: Sendable {
     /// default is false because CallKit's island already represents a backgrounded audio call, and
     /// a window appearing on every app switch is intrusive when there is only an avatar to show.
     public var isAutomaticPictureInPictureForAudioCallsEnabled: Bool
+    /// Above this many people in the call, counting ourselves, nobody joining or leaving plays a
+    /// sound. Read when media connects. Not a user setting: it is how big a call has to be before
+    /// arrivals stop being news, and both platforms default to the same number.
+    ///
+    /// Join and leave sounds have no off switch, as on web; this is the only thing that quiets them.
+    /// Any switch for other sound effects, such as reactions, is a separate option.
+    public var participantCapForJoinLeaveSounds: Int
     
     public init(isPictureInPictureEnabled: Bool = true,
-                elementCallCompatibility: MatrixRTCElementCallCompat = .stateEvents,
+                membershipFormat: MatrixRTCMembershipFormat = .roomState,
                 isDeveloperModeEnabled: Bool = false,
                 isScreenSharingEnabled: Bool = false,
-                isAutomaticPictureInPictureForAudioCallsEnabled: Bool = false) {
+                isAutomaticPictureInPictureForAudioCallsEnabled: Bool = false,
+                participantCapForJoinLeaveSounds: Int = MatrixRTCMediaSession.defaultParticipantCapForJoinLeaveSounds) {
         self.isPictureInPictureEnabled = isPictureInPictureEnabled
-        self.elementCallCompatibility = elementCallCompatibility
+        self.membershipFormat = membershipFormat
         self.isDeveloperModeEnabled = isDeveloperModeEnabled
         self.isScreenSharingEnabled = isScreenSharingEnabled
         self.isAutomaticPictureInPictureForAudioCallsEnabled = isAutomaticPictureInPictureForAudioCallsEnabled
+        self.participantCapForJoinLeaveSounds = participantCapForJoinLeaveSounds
     }
 }
 
@@ -117,11 +126,25 @@ public nonisolated struct ElementCallStrings: Sendable {
     public var error: String
     public var stop: String
     public var back: String
+    /// The audio output menu's rows for the built-in outputs and wired headphones. Other hardware
+    /// is named by its port, which is the name the user gave their headset or car.
+    public var speaker: String
+    public var phone: String
+    public var headphones: String
     
-    public init(you: String = "You", error: String = "Error", stop: String = "Stop", back: String = "Back") {
+    public init(you: String = "You",
+                error: String = "Error",
+                stop: String = "Stop",
+                back: String = "Back",
+                speaker: String = "Speaker",
+                phone: String = "Phone",
+                headphones: String = "Headphones") {
         self.you = you
         self.error = error
         self.stop = stop
         self.back = back
+        self.speaker = speaker
+        self.phone = phone
+        self.headphones = headphones
     }
 }

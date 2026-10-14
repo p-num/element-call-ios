@@ -5,98 +5,130 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
+import ElementCallKit
 import SwiftUI
 
 /// Where one tile sits on the stage and how it draws itself there.
 struct ElementCallTilePlacement: Identifiable, Equatable {
     let tile: ElementCallTile
-    /// In the stage's coordinate space: origin top leading, the bottom safe area included.
+    /// In **content** coordinates: origin at the top leading corner of the scrolling content, the
+    /// bottom safe area included. The stage scrolls the content; the spotlight counter-scrolls.
     var frame: CGRect
     var appearance: ElementCallTileAppearance
     var isSpotlight: Bool
-    /// The strip page the tile is on; nil for tiles that don't page (the spotlight, a one-to-one call).
-    var page: Int?
+    /// How much of this tile's video is worth asking for. Never ``ElementCallTileVisibility/released``
+    /// here: a tile that far away is not composed at all, and is in ``ElementCallStageLayout/hiddenTileIDs``.
+    var visibility: ElementCallTileVisibility
+    /// This tile's index in the model's order, for the detail window; nil for our own tile, which
+    /// is not in the order.
+    var orderIndex: Int?
     var zIndex: Double
+    /// How the picture sits in the frame. Last and defaulted so the grid's placements need not say.
+    var contentFit: ElementCallTileFit = .standard
     
-    var id: String {
+    var id: MatrixRTCTileID {
         tile.id
     }
 }
 
+/// How a placement asks its picture to sit in the frame.
+///
+/// A rule rather than a value because the layout cannot see a remote stream's shape, for the reason
+/// the full-screen arrangement gives: the tile resolves it against the aspect its renderer reports.
+enum ElementCallTileFit: Equatable {
+    /// The tile's own rule: a camera fills, a share fits, the spotlight sits between the two.
+    case standard
+    /// Shown whole when the picture is landscape and the frame is not, filled otherwise: the one
+    /// exception R4 makes to filling the screen.
+    case fitWhenLandscape
+}
+
 /// How much of a tile's video is still worth asking the SFU for.
 ///
-/// Three states rather than two because the core draws the same distinction: a tile one swipe away
-/// is paused so its picture comes straight back, while a tile several pages away is released, which
-/// is the only one that stops a thirty-person call from holding thirty subscriptions.
+/// Three states rather than two because the core draws the same distinction: a tile a scroll away
+/// is paused so its picture comes straight back, while a tile further away is released, which is
+/// the only one that stops a two-hundred-person call from holding two hundred subscriptions.
 enum ElementCallTileVisibility: Equatable {
     /// On screen, drawing: subscribed at the size it draws.
     case live
-    /// A page away: paused, instant to resume.
+    /// Within one viewport of the screen: subscribed but not sent, so it resumes at once and its
+    /// last picture is still there when it scrolls in (003 R49, R56).
     case paused
-    /// Further than a swipe: unsubscribed as fully as the transport allows.
+    /// Further than that: unsubscribed as fully as the transport allows (R48).
     case released
     
-    /// A tile that does not page (the spotlight, either half of a one-to-one call) is always drawn.
-    /// Otherwise it is how far its page is from the one in view: the neighbour is a single swipe
-    /// away and only pauses, so its picture is there the instant the finger moves, and anything
-    /// beyond it is released. That one step of slack is what keeps paging feeling instant while
-    /// still letting a thirty-person call hold far fewer than thirty subscriptions.
-    ///
-    /// `livePages` rather than just the current page because a swipe in progress has two pages on
-    /// screen at once, and the one being left has to keep its picture until the snap finishes.
-    static func forPage(_ page: Int?, currentPage: Int, livePages: Set<Int>) -> ElementCallTileVisibility {
-        guard let page else { return .live }
-        if livePages.contains(page) {
+    /// By distance from the viewport, in content coordinates, with one asymmetry: a tile that is
+    /// live stays live until it is more than half a viewport past the edge. Without that a tile
+    /// bouncing at the edge of the screen would stop and restart its stream on every bounce; the
+    /// call's own linger only guards the release step, not the pause (R58).
+    static func forFrame(_ frame: CGRect, viewport: CGRect, wasLive: Bool) -> ElementCallTileVisibility {
+        let distance = max(viewport.minY - frame.maxY, frame.minY - viewport.maxY, 0)
+        if frame.intersects(viewport) || distance == 0 {
             return .live
         }
-        return abs(page - currentPage) == 1 ? .paused : .released
+        if wasLive, distance <= viewport.height / 2 {
+            return .live
+        }
+        return distance <= viewport.height ? .paused : .released
     }
 }
 
 /// The arrangement of every tile for one state of the call, computed as rects so that a tile keeps
-/// its view identity however the call changes around it: a spotlight change, the other person
-/// arriving in a DM or a third person turning it into a group call all become the same tiles moving
-/// and resizing, which is what makes the screen feel native rather than a sequence of fades.
+/// its view identity however the call changes around it: a tile promoted into the spotlight, a
+/// third person turning two rows into a grid, a rotation, all become the same tiles moving and
+/// resizing, which is what makes the screen feel native rather than a sequence of fades.
+///
+/// Spec 003: a 4:3 grid that scrolls vertically, and a 16:9 spotlight that stays put above it for a
+/// hero or, in a large call, the speaker. Only what is near the screen is composed at all, so a call
+/// of two hundred costs the phone what is on its screen rather than what is in the room. Calls of up
+/// to five with no remote share are spec 019's instead (`ElementCallSmallCallLayout`), producing
+/// this same value so a tile crossing between the two is a move rather than a remount.
 struct ElementCallStageLayout: Equatable {
     /// What the stage has to work with. Distances in points.
     struct Metrics: Equatable {
-        /// The whole stage, bottom safe area included.
+        /// The whole stage, bottom safe area included. Also the viewport: what one screen shows.
         var area: CGSize
         /// The bottom safe area, which only a full-bleed picture may run under.
         var bottomInset: CGFloat
-        /// The side safe areas. Zero in portrait; in landscape the sensor housing sits on one of
-        /// them, and a card drawn under it loses a corner.
+        /// The side safe areas, for a stage that extends under them. The shipping stage does not:
+        /// it sits inside them, so it passes zero, and passing what the reader reports put a second
+        /// housing's width of nothing on each side in landscape.
         var leadingInset: CGFloat = 0
         var trailingInset: CGFloat = 0
-        /// How far the floating controls reach in from the edge they are on: up from the safe area
-        /// in portrait, in from the trailing edge in landscape.
+        /// How far the floating controls reach up from the safe area. Along the bottom in both
+        /// orientations: in landscape the bar floats over the spotlight, which runs under it,
+        /// and only the grid's content end keeps clear of it.
         var controlsClearance: CGFloat
+        /// How far above the content's zero the screen's top edge is: the portrait top bar's room
+        /// and the top safe area. Only a picture that runs behind the top bar reaches up into it
+        /// (019 R4).
+        var topBleed: CGFloat = 0
         
         static let horizontalMargin: CGFloat = 16
         static let spacing: CGFloat = 12
+        /// A grid tile is 4 wide by 3 high, in every orientation and at every call size (R10):
+        /// filling crops a portrait and a landscape camera by an acceptable amount (R11).
+        static let tileAspect: CGFloat = 4.0 / 3.0
+        /// The spotlight in portrait: the width of the stage and exactly 16:9 of it, whatever the
+        /// stage height (R13); a screen share at the default presentation ratio fits it exactly.
+        static let spotlightAspect: CGFloat = 16.0 / 9.0
         static let columns = 2
-        static let maxRowsPerPage = 3
-        /// A landscape page is one tile wide, so it takes more rows before paging earns its keep.
-        static let maxRowsPerLandscapePage = 4
-        /// Landscape without a spotlight is a wide empty stage; two columns would be enormous.
-        static let landscapeColumnsWithoutSpotlight = 3
-        /// The design's ratio for a strip cell.
-        static let stripAspectRatio: CGFloat = 1.2
-        /// The spotlight's share of the height above the controls, in portrait.
-        static let spotlightFraction: CGFloat = 0.4
+        /// Landscape without a spotlight: four across, width-driven like portrait's two, as the
+        /// design draws it. R32's height-driven row gives three on a phone; the frame has four.
+        static let landscapeColumns = 4
+        /// Room under the portrait spotlight for the hero stack's dots, between it and the grid.
+        static let heroDotsClearance: CGFloat = 20
         /// The landscape tile column's share of the width, and the bounds it is held within: a
         /// share alone gives a useless 90 pt column on a small phone and a 300 pt one on an iPad.
         static let landscapeColumnFraction: CGFloat = 0.22
         static let landscapeColumnRange: ClosedRange<CGFloat> = 140...220
-        /// The fewest tiles the landscape column is widened down to fit. A share of the width alone
-        /// put a 179 pt column on a 375 pt phone, whose 149 pt cells missed a second row by 8 pt:
-        /// seven people became seven pages, each showing one tile beside half a column of nothing.
-        /// The column is as wide as the share allows or as wide as two rows allow, whichever is less.
+        /// The fewest whole tiles the landscape column shows (R31). A share of the width alone put a
+        /// 179 pt column on a 375 pt phone whose cells missed a second row by 8 pt.
         static let landscapeColumnMinimumRows = 2
         
         /// Landscape is a stage wider than it is tall, and that is the whole of what the layout
-        /// needs to know. Not the device, not the size class: a half-screen iPad app in portrait
-        /// wants the portrait arrangement whatever the hardware is doing.
+        /// needs to know (R33). Not the device, not the size class: a half-screen iPad app in
+        /// portrait wants the portrait arrangement whatever the hardware is doing.
         var isLandscape: Bool {
             area.width > area.height
         }
@@ -106,9 +138,9 @@ struct ElementCallStageLayout: Equatable {
             area.height - bottomInset
         }
         
-        /// The lowest point a card may reach. In portrait the controls float above the safe area
-        /// and cards stop short of them; in landscape the controls are off to the trailing side, so
-        /// the only thing below a card is the safe area itself.
+        /// The lowest point a card may reach on one screen. In portrait the controls float above
+        /// the safe area and cards stop short of them; in landscape the spotlight takes the full
+        /// height and the bar floats over it, so a card may reach the safe area itself.
         var cardsBottom: CGFloat {
             isLandscape ? safeBottom - Self.spacing : safeBottom - controlsClearance - Self.spacing
         }
@@ -117,65 +149,128 @@ struct ElementCallStageLayout: Equatable {
             leadingInset + Self.horizontalMargin
         }
         
-        /// Inside the safe area, and inside the controls rail when landscape has put it here.
+        /// Inside the safe area. Landscape used to keep a controls rail here; the bar is along
+        /// the bottom now in both orientations.
         var cardsTrailing: CGFloat {
-            area.width - trailingInset - Self.horizontalMargin - (isLandscape ? controlsClearance : 0)
+            area.width - trailingInset - Self.horizontalMargin
         }
         
         var cardsWidth: CGFloat {
             cardsTrailing - cardsLeading
         }
         
-        /// The whole area a card may use, both orientations.
+        /// The whole area a card may use on one screen, both orientations.
         var cardsFrame: CGRect {
             CGRect(x: cardsLeading, y: 0, width: cardsWidth, height: cardsBottom)
         }
+        
+        /// What the grid's last row has to clear once scrolled to the end: the controls, the safe
+        /// area and a gap (R44). The same in both orientations, since the bar is along the bottom
+        /// in both; in landscape that is more than `cardsBottom` leaves, because the spotlight may
+        /// run under the bar and the grid's end may not.
+        var bottomClearance: CGFloat {
+            bottomInset + controlsClearance + Self.spacing
+        }
     }
     
-    /// Clear of every z position the other arrangements hand out: the spotlight's 1 and the
-    /// one-to-one thumbnail's 2. Named so the relationship is something a test can assert rather
-    /// than something the next person has to notice.
+    /// Everything the arrangement depends on, so a test states one value and the stage passes one.
+    struct Input: Equatable {
+        /// Ourselves first, then the model's order untouched (R1).
+        var tiles: [ElementCallTile]
+        /// Chosen by the screen (`ElementCallSpotlight`); nil when every tile is the same size.
+        var spotlightID: MatrixRTCTileID?
+        var fullscreenID: MatrixRTCTileID?
+        /// How far the content has scrolled, in points. The spotlight is placed relative to it.
+        var scrollOffset: CGFloat = 0
+        /// Tiles that were live on the previous pass, for the edge hysteresis.
+        var liveTileIDs: Set<MatrixRTCTileID> = []
+        var metrics: Metrics
+        // What only the small-call layout reads (019). Last and defaulted, so a grid test states
+        // none of them.
+        /// `ElementCallSmallCallLayout.speaker(...)`'s choice, held through silence.
+        var speakerID: MatrixRTCTileID?
+        var ownCorner: ElementCallOwnTileCorner = .bottomRight
+        /// Our own picture's upright width over height, once one has been drawn.
+        var ownVideoAspect: CGFloat?
+        var floatingInsets = ElementCallSmallCallLayout.FloatingInsets.zero
+    }
+    
+    /// What the layout asks the core for full records of: a rank range over the remote order for
+    /// the grid, plus the tiles drawn out of rank (R52, R53). Ranks rather than pages, and carried
+    /// by each tile through the arrangement, so nothing translates "row N" into a rank.
+    typealias DetailWindow = MatrixRTCDetailWindow
+    
+    /// Several heroes, one shown (R19).
+    struct HeroStack: Equatable {
+        var count: Int
+        var shown: Int
+    }
+    
+    /// Clear of every z position the arrangements hand out: the spotlight's 1, which is above the
+    /// grid because the grid scrolls underneath it. Named so the relationship is something a test
+    /// can assert rather than something the next person has to notice.
     static let fullscreenZIndex: Double = 3
+    /// The scrim behind a tile going full screen: over everything it replaces, the spotlight's
+    /// controls included, and under the tile itself.
+    static let fullscreenScrimZIndex = 2.5
+    static let spotlightZIndex: Double = 1
     
     var placements: [ElementCallTilePlacement]
-    var pageCount: Int
-    /// Where the page dots go when there are pages to show.
-    var pageIndicatorCenter: CGPoint?
-    /// Which way the strip pages, and so which way a swipe is read and the dots stack.
-    var pageAxis: Axis = .horizontal
-    /// Whose tile hosts the Picture in Picture source view: the picture the window continues.
-    var pictureInPictureMemberID: String?
-    /// Members the arrangement leaves out altogether, which today means everyone but the one tile
-    /// filling the screen. The stage releases them: it derives the released set from the placements,
-    /// and a single placement would otherwise compute the empty set and un-release the whole call at
-    /// the very moment nobody is looking at it. **Declared last** because the memberwise initialiser
-    /// follows declaration order and the arrangements below call it with trailing labels.
-    var hiddenMemberIDs: Set<String> = []
+    /// How tall the scrolling content is; at least one viewport.
+    var contentHeight: CGFloat
+    /// The screen, in content coordinates, for the offset the arrangement was computed at.
+    var viewport: CGRect
+    var detailWindow: DetailWindow = .none
+    var heroStack: HeroStack?
+    /// Which tile hosts the Picture in Picture source view: the picture the window continues. A
+    /// tile rather than a member, because when somebody shares it is their *screen* the window
+    /// continues, and their camera is a different picture elsewhere on the same stage.
+    var pictureInPictureTileID: MatrixRTCTileID?
+    /// Tiles the arrangement leaves out altogether: everything but the one tile filling the
+    /// screen, the heroes not currently shown, and the grid rows more than a viewport away. The
+    /// stage releases them: it derives the released set from the placements, and a single placement
+    /// would otherwise compute the empty set and un-release the whole call at the very moment
+    /// nobody is looking at it. **Declared last** because the memberwise initialiser follows
+    /// declaration order and the arrangements below call it with trailing labels.
+    var hiddenTileIDs: Set<MatrixRTCTileID> = []
+    /// Nothing scrolls: the content is exactly one viewport, and the stage disables its scroller so
+    /// it does not even bounce, which would compete with dragging our own tile (019 R30).
+    var isStatic = false
+    /// The order a screen reader walks the tiles in, when it is not the order they are drawn in
+    /// (019 R27). Empty means the stage's own order.
+    var readingOrder: [MatrixRTCTileID] = []
     
-    static func compute(tiles: [ElementCallTile],
-                        spotlightMemberID: String?,
-                        fullscreenMemberID: String? = nil,
-                        layout: ElementCallLayout,
-                        currentPage: Int,
-                        metrics: Metrics) -> ElementCallStageLayout {
-        guard !tiles.isEmpty else {
-            return ElementCallStageLayout(placements: [], pageCount: 0)
+    /// The furthest the content can scroll. What a shrinking grid settles to (R42).
+    var maxScrollOffset: CGFloat {
+        max(0, contentHeight - viewport.height)
+    }
+    
+    static func compute(_ input: Input) -> ElementCallStageLayout {
+        let metrics = input.metrics
+        let viewport = CGRect(x: 0, y: input.scrollOffset, width: metrics.area.width, height: metrics.area.height)
+        guard !input.tiles.isEmpty else {
+            return ElementCallStageLayout(placements: [], contentHeight: viewport.height, viewport: viewport)
         }
-        // A member who has left is no longer in `tiles`, and the arrangement falls back on its own
-        // rather than showing an empty screen. The screen clears the stale id when it notices.
-        if let fullscreenMemberID, let tile = tiles.first(where: { $0.memberID == fullscreenMemberID }) {
-            return fullscreen(tile: tile, others: tiles.filter { $0.memberID != fullscreenMemberID }, metrics: metrics)
+        // The ordinary arrangement is computed even when one tile fills the screen, for its
+        // content height: a scroller whose content shrank to one screen would clamp the offset to
+        // zero, and leaving fullscreen would land at the top instead of where you were (R63).
+        var layout = ElementCallSmallCallLayout.applies(to: input.tiles)
+            ? ElementCallSmallCallLayout.arrange(input, viewport: viewport)
+            : arrange(input, viewport: viewport)
+        // A tile that has gone is no longer in `tiles` — its member left, or their share stopped —
+        // and the arrangement falls back on its own rather than showing an empty screen. The screen
+        // clears the stale id when it notices.
+        if let fullscreenID = input.fullscreenID, let tile = input.tiles.first(where: { $0.id == fullscreenID }) {
+            layout = fullscreen(tile: tile, others: input.tiles.filter { $0.id != fullscreenID }, over: layout)
         }
-        if layout == .oneToOne, let local = tiles.first(where: \.isLocal) {
-            return oneToOne(local: local, remote: tiles.first { !$0.isLocal }, metrics: metrics)
-        }
-        return group(tiles: tiles, spotlightMemberID: spotlightMemberID, currentPage: currentPage, metrics: metrics)
+        return layout
     }
     
     // MARK: - Full screen
     
-    /// One tile and nothing else, edge to edge. The others keep their place in the call but not on
-    /// the stage, so they are named as hidden rather than simply dropped.
+    /// One tile and nothing else, edge to edge on the screen as scrolled. The others keep their
+    /// place in the call but not on the stage, so they are named as hidden rather than simply
+    /// dropped.
     ///
     /// The picture fits rather than fills at this size (see ``VideoPresentation``), so the frame is
     /// the whole area whatever shape the picture turns out to be: the letterbox is the renderer's
@@ -183,235 +278,183 @@ struct ElementCallStageLayout: Equatable {
     /// stream it cannot see.
     ///
     /// Above everything, hence ``fullscreenZIndex``: the tiles it replaces are *leaving*, and a
-    /// leaving view keeps its z position for as long as its transition runs. At the strip's own
-    /// zero, a tile growing out of the strip had the spotlight's 1 fading out on top of it all the
+    /// leaving view keeps its z position for as long as its transition runs. At the grid's own
+    /// zero, a tile growing out of the grid had the spotlight's 1 fading out on top of it all the
     /// way up, which is the one moment in the whole move when something is covering the thing you
     /// just asked to see.
-    private static func fullscreen(tile: ElementCallTile, others: [ElementCallTile], metrics: Metrics) -> ElementCallStageLayout {
+    private static func fullscreen(tile: ElementCallTile, others: [ElementCallTile], over layout: ElementCallStageLayout) -> ElementCallStageLayout {
         ElementCallStageLayout(placements: [ElementCallTilePlacement(tile: tile,
-                                                                     frame: CGRect(origin: .zero, size: metrics.area),
+                                                                     frame: layout.viewport,
                                                                      appearance: .fullscreen,
                                                                      isSpotlight: false,
-                                                                     page: nil,
+                                                                     visibility: .live,
+                                                                     orderIndex: layout.placements.first { $0.id == tile.id }?.orderIndex,
                                                                      zIndex: fullscreenZIndex)],
-                               pageCount: 1,
-                               pictureInPictureMemberID: tile.memberID,
-                               hiddenMemberIDs: Set(others.map(\.memberID)))
+                               contentHeight: layout.contentHeight,
+                               viewport: layout.viewport,
+                               // Nothing but the one tile is drawn, so nothing but the one tile is
+                               // asked for (R53): a window of zero ranks and one identity is valid.
+                               detailWindow: DetailWindow(ranks: 0..<0, also: [tile.id]),
+                               heroStack: nil,
+                               pictureInPictureTileID: tile.id,
+                               hiddenTileIDs: Set(others.map(\.id)))
     }
     
-    // MARK: - One-to-one
+    // MARK: - The arrangement
     
-    /// The thumbnail's short side as a share of the area's short side, its short over long side,
-    /// and the most either side may take of the matching side of the area (near-square windows).
-    private static let thumbnailFraction: CGFloat = 0.38
-    private static let thumbnailAspect: CGFloat = 2 / 3
-    private static let thumbnailMaxFraction: CGFloat = 0.5
-    private static let thumbnailMargin: CGFloat = 16
-    
-    /// The other person edge to edge, ourselves as a thumbnail in the bottom trailing corner, kept
-    /// clear of the floating controls. Until they arrive our own camera has the screen instead.
-    private static func oneToOne(local: ElementCallTile, remote: ElementCallTile?, metrics: Metrics) -> ElementCallStageLayout {
-        let main = remote ?? local
-        var placements = [ElementCallTilePlacement(tile: main,
-                                                   frame: CGRect(origin: .zero, size: metrics.area),
-                                                   appearance: .fullBleed,
-                                                   isSpotlight: false,
-                                                   page: nil,
-                                                   zIndex: 0)]
-        if remote != nil {
-            let size = thumbnailSize(in: CGSize(width: metrics.area.width, height: metrics.safeBottom))
-            // The thumbnail dodges the controls on whichever edge they are: below it in portrait,
-            // beside it in landscape. Only the picture behind it runs full bleed.
-            let trailingChrome = metrics.trailingInset + (metrics.isLandscape ? metrics.controlsClearance : 0)
-            let bottomChrome = metrics.isLandscape ? 0 : metrics.controlsClearance
-            let origin = CGPoint(x: metrics.area.width - trailingChrome - thumbnailMargin - size.width,
-                                 y: metrics.safeBottom - bottomChrome - thumbnailMargin - size.height)
-            placements.append(ElementCallTilePlacement(tile: local,
-                                                       frame: CGRect(origin: origin, size: size),
-                                                       appearance: .thumbnail,
-                                                       isSpotlight: false,
-                                                       page: nil,
-                                                       zIndex: 2))
+    private static func arrange(_ input: Input, viewport: CGRect) -> ElementCallStageLayout {
+        let heroes = ElementCallSpotlight.heroes(in: input.tiles)
+        let spotlit = input.tiles.firstIndex { $0.id == input.spotlightID && !$0.isLocal }.map { (rank: $0 - 1, tile: input.tiles[$0]) }
+        let spotlight = spotlit?.tile
+        
+        // A hero is only ever drawn in the spotlight (R17); one not shown is neither drawn nor sent
+        // video (R24). The spotlight itself comes out of the grid, own tile first as given (R1).
+        let unshownHeroes = Set(heroes).subtracting([spotlight?.id].compactMap { $0 })
+        // Each with its rank, so nothing searches the order for it per tile on every scroll frame.
+        let grid = input.tiles.indices
+            .filter { input.tiles[$0].id != spotlight?.id && !unshownHeroes.contains(input.tiles[$0].id) }
+            .map { (rank: $0 - 1, tile: input.tiles[$0]) }
+        
+        var heroStack: HeroStack?
+        if let spotlight, heroes.count > 1, let shown = heroes.firstIndex(of: spotlight.id) {
+            heroStack = HeroStack(count: heroes.count, shown: shown)
         }
-        return ElementCallStageLayout(placements: placements, pageCount: 1, pictureInPictureMemberID: main.memberID)
+        // No small-call case here: a stage of five tiles or fewer without a spotlight never gets
+        // this far (019 supersedes 003 R34–R36).
+        var layout = ranked(grid, spotlight: spotlit, heroStack: heroStack, input: input, viewport: viewport)
+        layout.hiddenTileIDs.formUnion(unshownHeroes)
+        layout.heroStack = heroStack
+        return layout
     }
     
-    /// Sized from the area's short side so it is the same share of the screen whichever way the
-    /// phone is held; its long side follows the area's orientation because the renderer centre-crops
-    /// and a sideways camera sends a landscape frame.
-    static func thumbnailSize(in area: CGSize) -> CGSize {
-        let shortSide = min(area.width, area.height) * thumbnailFraction
-        let longSide = shortSide / thumbnailAspect
-        var width = area.width > area.height ? longSide : shortSide
-        var height = area.width > area.height ? shortSide : longSide
-        let scale = min(1, area.width * thumbnailMaxFraction / width, area.height * thumbnailMaxFraction / height)
-        width *= scale
-        height *= scale
-        return CGSize(width: width, height: height)
-    }
-    
-    // MARK: - Group
-    
-    /// Where the spotlight sits, where the strip runs and which way its pages slide. Portrait
-    /// stacks the two, landscape puts them side by side, and everything after this point is the
-    /// same arithmetic over whatever rect the strip got. Forking the two orientations into separate
-    /// functions duplicated the paging maths, which is the part actually worth getting right.
-    private struct StripPlan {
-        var spotlightFrame: CGRect
-        var stripFrame: CGRect
-        var columns: Int
-        var maxRowsPerPage: Int
-        var pageAxis: Axis
-    }
-    
-    private static func plan(metrics: Metrics, hasSpotlight: Bool) -> StripPlan {
-        guard metrics.isLandscape else {
-            let spotlightFrame = CGRect(x: metrics.cardsLeading,
-                                        y: 0,
-                                        width: metrics.cardsWidth,
-                                        height: metrics.safeBottom * Metrics.spotlightFraction)
-            let stripTop = hasSpotlight ? spotlightFrame.maxY + Metrics.spacing : 0
-            return StripPlan(spotlightFrame: spotlightFrame,
-                             stripFrame: CGRect(x: metrics.cardsLeading,
-                                                y: stripTop,
-                                                width: metrics.cardsWidth,
-                                                height: metrics.cardsBottom - stripTop),
-                             columns: Metrics.columns,
-                             maxRowsPerPage: Metrics.maxRowsPerPage,
-                             pageAxis: .horizontal)
+    /// The spotlight slot, if there is a spotlight, and the grid: two columns in portrait, a
+    /// one-tile column beside the spotlight in landscape, a grid of two full rows in landscape
+    /// without one. Rows start at the top of the grid area and a partial last row is left-aligned
+    /// (R29): centring either would move every neighbour each time someone joins. Every grid tile
+    /// is the same size (R12).
+    ///
+    /// Only the rows within a viewport of the screen are composed; the rest are hidden and so
+    /// released (R47, R48). Each composed remote tile carries its rank, and the detail window is the
+    /// range over them plus the spotlight (R52, R53).
+    private static func ranked(_ grid: [(rank: Int, tile: ElementCallTile)], spotlight: (rank: Int, tile: ElementCallTile)?, heroStack: HeroStack?, input: Input, viewport: CGRect) -> ElementCallStageLayout {
+        let metrics = input.metrics
+        var placements = [ElementCallTilePlacement]()
+        var hidden = Set<MatrixRTCTileID>()
+        var also = Set<MatrixRTCTileID>()
+        
+        let spotlightFrame: CGRect?
+        let gridFrame: CGRect
+        let columns: Int
+        let cellWidth: CGFloat
+        let cellHeight: CGFloat
+        
+        if !metrics.isLandscape {
+            // Full-bleed, as the design draws it: the whole stage width and exactly 16:9 of it,
+            // while the grid keeps its margins. It counter-scrolls to sit at the top of the
+            // viewport (R27), so its frame is placed at the offset it was computed for.
+            if spotlight != nil {
+                spotlightFrame = CGRect(x: 0, y: viewport.minY, width: metrics.area.width, height: metrics.area.width / Metrics.spotlightAspect)
+            } else {
+                spotlightFrame = nil
+            }
+            // Several heroes put a row of dots under the spotlight (R19), and the grid starts
+            // under those.
+            let gridTop = spotlightFrame.map { $0.height + (heroStack == nil ? 0 : Metrics.heroDotsClearance) + Metrics.spacing } ?? 0
+            gridFrame = CGRect(x: metrics.cardsLeading, y: gridTop, width: metrics.cardsWidth, height: 0)
+            columns = Metrics.columns
+            // Half the grid width less the gap, however much that leaves below the last row (R30).
+            cellWidth = (metrics.cardsWidth - CGFloat(columns - 1) * Metrics.spacing) / CGFloat(columns)
+            cellHeight = cellWidth / Metrics.tileAspect
+        } else if spotlight != nil {
+            // Landscape has height to spare nowhere and width to spare everywhere: the spotlight
+            // takes the full stage height and all the width the column leaves (R14), the column is
+            // one tile wide and shows at least two whole tiles (R31). The column is as wide as the
+            // share allows or as wide as two rows allow, whichever is less.
+            let rows = CGFloat(Metrics.landscapeColumnMinimumRows)
+            let widthThatFitsTheRows = (metrics.cardsBottom - (rows - 1) * Metrics.spacing) / rows * Metrics.tileAspect
+            let columnWidth = min(max(min(metrics.area.width * Metrics.landscapeColumnFraction, widthThatFitsTheRows),
+                                      Metrics.landscapeColumnRange.lowerBound),
+                                  Metrics.landscapeColumnRange.upperBound)
+            let columnX = metrics.cardsTrailing - columnWidth
+            spotlightFrame = CGRect(x: metrics.cardsLeading,
+                                    y: viewport.minY,
+                                    width: columnX - Metrics.spacing - metrics.cardsLeading,
+                                    height: metrics.cardsBottom)
+            gridFrame = CGRect(x: columnX, y: 0, width: columnWidth, height: 0)
+            columns = 1
+            cellWidth = columnWidth
+            cellHeight = columnWidth / Metrics.tileAspect
+        } else {
+            // Four across, width-driven, rows scrolling under the bar: what the design draws.
+            // Left-aligned like every other row; the centring this used to do is exactly what
+            // R29 rules out.
+            spotlightFrame = nil
+            columns = Metrics.landscapeColumns
+            cellWidth = (metrics.cardsWidth - CGFloat(columns - 1) * Metrics.spacing) / CGFloat(columns)
+            cellHeight = cellWidth / Metrics.tileAspect
+            gridFrame = CGRect(x: metrics.cardsLeading, y: 0, width: metrics.cardsWidth, height: 0)
         }
         
-        // Landscape has height to spare nowhere and width to spare everywhere, so the spotlight
-        // takes the width and the others queue up beside it in a single column. A two-column strip
-        // under a 40%-height spotlight, which is what portrait does, leaves a 96 pt slot for a
-        // 346 pt tile: the tiles ran off the bottom of the screen and under the control bar.
-        guard hasSpotlight else {
-            return StripPlan(spotlightFrame: metrics.cardsFrame,
-                             stripFrame: metrics.cardsFrame,
-                             columns: Metrics.landscapeColumnsWithoutSpotlight,
-                             maxRowsPerPage: Metrics.maxRowsPerLandscapePage,
-                             pageAxis: .vertical)
-        }
-        let rows = CGFloat(Metrics.landscapeColumnMinimumRows)
-        let widthThatFitsTheRows = (metrics.cardsBottom - (rows - 1) * Metrics.spacing) / rows * Metrics.stripAspectRatio
-        let columnWidth = min(max(min(metrics.area.width * Metrics.landscapeColumnFraction, widthThatFitsTheRows),
-                                  Metrics.landscapeColumnRange.lowerBound),
-                              Metrics.landscapeColumnRange.upperBound)
-        let columnX = metrics.cardsTrailing - columnWidth
-        return StripPlan(spotlightFrame: CGRect(x: metrics.cardsLeading,
-                                                y: 0,
-                                                width: columnX - Metrics.spacing - metrics.cardsLeading,
-                                                height: metrics.cardsBottom),
-                         stripFrame: CGRect(x: columnX, y: 0, width: columnWidth, height: metrics.cardsBottom),
-                         columns: 1,
-                         maxRowsPerPage: Metrics.maxRowsPerLandscapePage,
-                         pageAxis: .vertical)
-    }
-    
-    /// The spotlight, and everyone else in pages of a grid beside or beneath it so tiles keep their
-    /// size however big the call gets. Alone (the spotlight is never ourselves) our own tile stands
-    /// in the spotlight slot and slides into its cell as the first person arrives.
-    private static func group(tiles: [ElementCallTile], spotlightMemberID: String?, currentPage: Int, metrics: Metrics) -> ElementCallStageLayout {
-        var placements: [ElementCallTilePlacement] = []
-        let spotlightTile = tiles.first { $0.memberID == spotlightMemberID }
-        let plan = plan(metrics: metrics, hasSpotlight: spotlightTile != nil)
-        
-        if let spotlight = spotlightTile {
-            placements.append(ElementCallTilePlacement(tile: spotlight,
-                                                       frame: plan.spotlightFrame,
-                                                       appearance: .card,
+        if let spotlight, let spotlightFrame {
+            placements.append(ElementCallTilePlacement(tile: spotlight.tile,
+                                                       frame: spotlightFrame,
+                                                       appearance: metrics.isLandscape ? .card : .spotlight,
                                                        isSpotlight: true,
-                                                       page: nil,
-                                                       zIndex: 1))
+                                                       visibility: .live,
+                                                       orderIndex: spotlight.rank,
+                                                       zIndex: spotlightZIndex))
+            also.insert(spotlight.tile.id)
         }
         
-        let strip = tiles.filter { $0.memberID != spotlightMemberID }
-        if placements.isEmpty, strip.count == 1, let only = strip.first {
-            // Nobody to compare against, so the one tile takes the room the spotlight would have
-            // had: the whole stage in landscape, the spotlight slot in portrait, which is where it
-            // is already sitting when the first person arrives and the strip appears beneath it.
-            let soloFrame = metrics.isLandscape ? metrics.cardsFrame : plan.spotlightFrame
-            placements.append(ElementCallTilePlacement(tile: only,
-                                                       frame: soloFrame,
-                                                       appearance: .card,
-                                                       isSpotlight: false,
-                                                       page: nil,
-                                                       zIndex: 1))
-            // The one tile anchors the window. This return omitted it, and it is the exact path a
-            // call takes while you are alone in it: one tile, and a spotlight that is never
-            // ourselves. The source view is mounted as the anchor tile's background, so no anchor
-            // meant no source view in any window, and AVKit refuses one whose scene is not
-            // foreground-active. Minimizing alone did nothing at all.
-            return ElementCallStageLayout(placements: placements,
-                                          pageCount: 1,
-                                          pageAxis: plan.pageAxis,
-                                          pictureInPictureMemberID: only.memberID)
-        }
-        
-        let cellWidth = (plan.stripFrame.width - CGFloat(plan.columns - 1) * Metrics.spacing) / CGFloat(plan.columns)
-        let cellHeight = cellWidth / Metrics.stripAspectRatio
-        let rowsThatFit = Int(((plan.stripFrame.height + Metrics.spacing) / (cellHeight + Metrics.spacing)).rounded(.down))
-        let rowsPerPage = min(plan.maxRowsPerPage, max(1, rowsThatFit))
-        let perPage = rowsPerPage * plan.columns
-        let pageCount = max(1, (strip.count + perPage - 1) / perPage)
-        
-        // The column runs the full height but its rows rarely divide it exactly, and on an iPad the
-        // remainder is most of a tile: centring puts it half above and half below instead of
-        // leaving the column hanging from the top with a hole under it. Centred on the page's
-        // capacity rather than on how many tiles this page happens to hold, so a half-full last
-        // page keeps its tiles where the full pages had them.
-        let usedHeight = CGFloat(rowsPerPage) * cellHeight + CGFloat(rowsPerPage - 1) * Metrics.spacing
-        let rowsOffset = plan.pageAxis == .vertical ? max(0, plan.stripFrame.height - usedHeight) / 2 : 0
-        
-        for (index, tile) in strip.enumerated() {
-            let page = index / perPage
-            let row = (index % perPage) / plan.columns
-            let column = index % plan.columns
-            // A page off to the side is a page's worth of stage away, which is what makes the swipe
-            // a translation of rects rather than a rebuild of views.
-            let pageOffset = CGFloat(page - currentPage)
-            var x = plan.stripFrame.minX + CGFloat(column) * (cellWidth + Metrics.spacing)
-            var y = plan.stripFrame.minY + rowsOffset + CGFloat(row) * (cellHeight + Metrics.spacing)
-            switch plan.pageAxis {
-            case .horizontal:
-                x += pageOffset * metrics.area.width
-            case .vertical:
-                y += pageOffset * metrics.area.height
+        // The band a tile has to be within to be composed at all: one viewport either side. A tile
+        // in it is live or paused; a tile beyond it is hidden and thereby released. Composition
+        // therefore costs three viewports of tiles at most, whatever the call size (R47).
+        let rowCount = (grid.count + columns - 1) / columns
+        var lowestRank = Int.max
+        var highestRank = -1
+        for (index, (rank, tile)) in grid.enumerated() {
+            let row = index / columns
+            let column = index % columns
+            let frame = CGRect(x: gridFrame.minX + CGFloat(column) * (cellWidth + Metrics.spacing),
+                               y: gridFrame.minY + CGFloat(row) * (cellHeight + Metrics.spacing),
+                               width: cellWidth,
+                               height: cellHeight)
+            let visibility = ElementCallTileVisibility.forFrame(frame, viewport: viewport, wasLive: input.liveTileIDs.contains(tile.id))
+            guard visibility != .released else {
+                hidden.insert(tile.id)
+                continue
+            }
+            if !tile.isLocal {
+                lowestRank = min(lowestRank, rank)
+                highestRank = max(highestRank, rank)
             }
             placements.append(ElementCallTilePlacement(tile: tile,
-                                                       frame: CGRect(x: x, y: y, width: cellWidth, height: cellHeight),
+                                                       frame: frame,
                                                        appearance: .card,
                                                        isSpotlight: false,
-                                                       page: page,
+                                                       visibility: visibility,
+                                                       orderIndex: tile.isLocal ? nil : rank,
                                                        zIndex: 0))
         }
         
+        let gridHeight = rowCount == 0 ? 0 : CGFloat(rowCount) * cellHeight + CGFloat(rowCount - 1) * Metrics.spacing
+        // Scrolled to the end the last row sits above the controls; scrolled to the top the first
+        // row sits under the spotlight, or at the top of the stage (R44).
+        let contentHeight = max(viewport.height, gridFrame.minY + gridHeight + metrics.bottomClearance)
+        let ranks = highestRank < lowestRank ? 0..<0 : lowestRank..<(highestRank + 1)
+        
         return ElementCallStageLayout(placements: placements,
-                                      pageCount: pageCount,
-                                      pageIndicatorCenter: pageCount > 1 ? indicatorCenter(plan: plan,
-                                                                                           metrics: metrics,
-                                                                                           rowsPerPage: rowsPerPage,
-                                                                                           cellHeight: cellHeight) : nil,
-                                      pageAxis: plan.pageAxis,
+                                      contentHeight: contentHeight,
+                                      viewport: viewport,
+                                      detailWindow: DetailWindow(ranks: ranks, also: also),
                                       // Falls back to any tile rather than going nil. The spotlight
-                                      // is never ourselves, so alone in a group call there is none —
+                                      // is never ourselves, so with nobody spotlit there is none —
                                       // and a nil here left the source view unmounted, which AVKit
                                       // refuses with "the UIScene for the content source has an
                                       // activation state other than foregroundActive". A view in no
-                                      // window belongs to no scene. Minimizing alone therefore did
-                                      // nothing at all, twice, because the retry fails the same way.
-                                      pictureInPictureMemberID: spotlightTile?.memberID ?? placements.first?.tile.memberID)
-    }
-    
-    /// Portrait has room under the strip for a row of dots. Landscape has none, so they go in the
-    /// gutter between the spotlight and the column, which is the one gap the layout guarantees.
-    private static func indicatorCenter(plan: StripPlan, metrics: Metrics, rowsPerPage: Int, cellHeight: CGFloat) -> CGPoint {
-        switch plan.pageAxis {
-        case .horizontal:
-            let stripBottom = plan.stripFrame.minY + CGFloat(rowsPerPage) * cellHeight + CGFloat(rowsPerPage - 1) * Metrics.spacing
-            return CGPoint(x: metrics.area.width / 2, y: min(stripBottom + Metrics.spacing, metrics.cardsBottom))
-        case .vertical:
-            return CGPoint(x: plan.stripFrame.minX - Metrics.spacing / 2, y: plan.stripFrame.midY)
-        }
+                                      // window belongs to no scene. Minimizing then did nothing at
+                                      // all, twice, because the retry fails the same way.
+                                      pictureInPictureTileID: spotlight?.tile.id ?? placements.first?.tile.id,
+                                      hiddenTileIDs: hidden)
     }
 }

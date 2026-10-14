@@ -48,6 +48,11 @@ public final class ElementCallController {
     public private(set) var connection: ElementCallConnection = .idle
     public private(set) var connectedAt: Date?
     public private(set) var isLoudspeaker = false
+    /// Everywhere the call can come out of, external hardware first. Only the speaker and the
+    /// receiver means the control bar shows a toggle; anything more and it offers a menu.
+    public private(set) var audioOutputs: [CallAudioOutput] = []
+    /// Which of ``audioOutputs`` the call is coming out of, or nil before the session has a route.
+    public private(set) var audioOutput: CallAudioOutput?
     public private(set) var isMaximized = true
     public private(set) var isTileStatsVisible = false
     
@@ -57,8 +62,9 @@ public final class ElementCallController {
     /// The last failure worth telling the user about; the screen shows it once and clears it.
     public var errorMessage: String?
     
-    public private(set) var session: MatrixRTCSession?
-    public private(set) var call: MatrixRTCCall?
+    /// Our membership in the room's call, from the join until the call ends.
+    public private(set) var rtcCall: MatrixRTCCall?
+    public private(set) var call: MatrixRTCMediaSession?
     
     /// The user's media intent while there is no call to hold it. The control bar is on screen from
     /// `.joining` onwards -- it is drawn whenever the screen is maximized, with no gate on the
@@ -95,8 +101,32 @@ public final class ElementCallController {
         call?.hasVideo ?? false
     }
     
-    /// The member spotlighted by the layout: a screen share, else the loudest recent speaker.
-    public private(set) var spotlightMemberID: String?
+    /// The tile the stage gives its largest slot, written by the screen through
+    /// ``setSpotlightTile(_:)``. The Picture in Picture window continues this tile's picture.
+    ///
+    /// **Stored, and written by the screen rather than computed here**, because the screen's rule
+    /// has memory the controller has no business holding: which hero the user swiped to, and who
+    /// spoke last while nobody is speaking. Computing "the hero, else the head of the ranking" here
+    /// — what this used to do — was the spotlight rule the layout spec names as wrong (003 R3): a
+    /// call small enough to see everyone has no spotlight at all.
+    ///
+    /// Nil between calls, and nil whenever every tile is the same size; the window's candidate
+    /// then falls back to the first tile with video (003 R68).
+    public private(set) var spotlightTileID: MatrixRTCTileID?
+    /// The window shows ``spotlightTileID`` or its placeholder, never somebody else instead. See
+    /// `MatrixRTCMediaSession.pictureInPictureCandidate(spotlight:isExact:)`.
+    public private(set) var isSpotlightTileExact = false
+    
+    /// Equality-guarded on purpose: the window re-reads its source inside observation tracking, so
+    /// an unguarded write on every roster would re-attach its stream once a second for nothing.
+    public func setSpotlightTile(_ tileID: MatrixRTCTileID?, isExact: Bool = false) {
+        if tileID != spotlightTileID {
+            spotlightTileID = tileID
+        }
+        if isExact != isSpotlightTileExact {
+            isSpotlightTileExact = isExact
+        }
+    }
     
     public var isInCall: Bool {
         switch connection {
@@ -109,8 +139,9 @@ public final class ElementCallController {
     public let style: ElementCallStyle
     public let options: ElementCallOptions
     
-    private let rtcService: MatrixRTCService
-    private let transport: any ElementCallMatrixTransportProtocol
+    private let rtcClient: MatrixRTCClient
+    /// The room the call is in, open from before the join until after the leave.
+    private var rtcRoom: MatrixRTCRoom?
     private let system: any ElementCallSystemProvidingProtocol
     private let logger: (any ElementCallLoggingProtocol)?
     private let actionsSubject = PassthroughSubject<ElementCallControllerAction, Never>()
@@ -118,22 +149,21 @@ public final class ElementCallController {
     private var routeObserver: NSObjectProtocol?
     private var cancellables = Set<AnyCancellable>()
     
-    init(rtcService: MatrixRTCService,
-         transport: any ElementCallMatrixTransportProtocol,
+    init(rtcClient: MatrixRTCClient,
          system: any ElementCallSystemProvidingProtocol,
          options: ElementCallOptions,
          style: ElementCallStyle,
          logger: (any ElementCallLoggingProtocol)?) {
-        self.rtcService = rtcService
-        self.transport = transport
+        self.rtcClient = rtcClient
         self.system = system
         self.options = options
         self.style = style
         self.logger = logger
         pictureInPicture.logger = logger
         
-        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.isLoudspeaker = CallAudioSessionConfigurator.isLoudspeaker }
+        routeObserver = NotificationCenter.default.addObserver(forName: AVAudioSession.routeChangeNotification, object: nil, queue: .main) { [weak self] notification in
+            let reason = (notification.userInfo?[AVAudioSessionRouteChangeReasonKey] as? UInt).flatMap(AVAudioSession.RouteChangeReason.init)
+            MainActor.assumeIsolated { self?.refreshAudioRoute(reason: reason) }
         }
         
         pictureInPicture.actions
@@ -322,18 +352,72 @@ public final class ElementCallController {
         }
     }
     
-    private func bindPictureInPictureIfEnabled(_ call: MatrixRTCCall) {
+    // MARK: - Raised hand
+    
+    /// While a raise or a lower is with the homeserver. The control shows progress and takes no
+    /// taps: not the new state, which nobody else can see yet (009 R5), and not the old one looking
+    /// tappable, which invites a second send.
+    public private(set) var isHandPending = false
+    
+    /// Read from our tile, which the core changes only once the homeserver has the annotation, so
+    /// the control shows what everyone else sees rather than the last tap. A refusal therefore
+    /// needs no undoing: the tile never moved (009 R22).
+    public var isHandRaised: Bool {
+        call?.ownTile?.handRaisedAt != nil
+    }
+    
+    /// A no-op before the join, which has no membership to put a hand on.
+    public func setHandRaised(_ raised: Bool) {
+        guard let rtcCall, !isHandPending else { return }
+        isHandPending = true
+        Task {
+            defer { isHandPending = false }
+            do {
+                if raised {
+                    try await rtcCall.raiseHand()
+                } else {
+                    try await rtcCall.lowerHand()
+                }
+            } catch {
+                log(.warning, "could not \(raised ? "raise" : "lower") the hand: \(error)")
+                errorMessage = raised ? "Your hand could not be raised." : "Your hand could not be lowered."
+            }
+        }
+    }
+    
+    private func bindPictureInPictureIfEnabled(_ call: MatrixRTCMediaSession) {
         guard options.isPictureInPictureEnabled, !pictureInPicture.isBound else { return }
         pictureInPicture.automaticStartIncludesAudioCalls = options.isAutomaticPictureInPictureForAudioCallsEnabled
-        pictureInPicture.bind(call: call) { [weak self] in self?.spotlightMemberID }
+        pictureInPicture.bind(call: call) { [weak self] in (self?.spotlightTileID, self?.isSpotlightTileExact ?? false) }
     }
     
     public func setLoudspeaker(_ enabled: Bool) {
         do {
             try CallAudioSessionConfigurator.setLoudspeaker(enabled)
-            isLoudspeaker = CallAudioSessionConfigurator.isLoudspeaker
         } catch {
             log(.warning, "could not switch the audio output: \(error)")
+        }
+        refreshAudioRoute()
+    }
+    
+    public func selectAudioOutput(_ output: CallAudioOutput) {
+        do {
+            try CallAudioSessionConfigurator.selectAudioOutput(output)
+        } catch {
+            log(.warning, "could not switch the audio output to \(output.kind): \(error)")
+        }
+        refreshAudioRoute()
+    }
+    
+    /// Re-reads the route. Logged only when the system changed it, with the ports as the session
+    /// names them: that is how a CarPlay route gets diagnosed, from a host's logs after a drive.
+    private func refreshAudioRoute(reason: AVAudioSession.RouteChangeReason? = nil) {
+        let route = CallAudioSessionConfigurator.audioOutputs(hasReceiver: UIDevice.current.userInterfaceIdiom == .phone)
+        audioOutputs = route.outputs
+        audioOutput = route.current
+        isLoudspeaker = CallAudioSessionConfigurator.isLoudspeaker
+        if let reason {
+            log(.info, "audio route changed (\(reason.rawValue)): \(CallAudioSessionConfigurator.routeDescription), offering \(route.outputs.map { "\($0.kind)" }), current \(route.current.map { "\($0.kind)" } ?? "none")")
         }
     }
     
@@ -373,31 +457,31 @@ public final class ElementCallController {
     
     private func runCall(_ callData: ElementCallData, room: any ElementCallRoomContextProtocol) async {
         log(.info, "joining \(room.roomID)")
-        guard let (session, transport) = await joinSession(for: callData, room: room) else { return }
+        guard let rtcCall = await joinCall(for: callData, room: room) else { return }
         
         connection = .connectingMedia
-        let call: MatrixRTCCall
+        let call: MatrixRTCMediaSession
         do {
-            call = try await session.connectMedia(transport: transport)
+            call = try await rtcCall.connectMedia()
         } catch {
-            await session.leave()
-            await rtcService.release(roomID: room.roomID)
             fail("Media failed: \(error)")
             return
         }
+        // Before anything else: from here on the session is handling the core's events.
+        call.participantCapForJoinLeaveSounds = options.participantCapForJoinLeaveSounds
         guard !Task.isCancelled else {
-            await abandon(session: session, call: call, roomID: room.roomID)
+            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
             return
         }
         self.call = call
         bindPictureInPictureIfEnabled(call)
         
-        await publishMedia(on: call, session: session, room: room)
+        await publishMedia(on: call, rtcCall: rtcCall, room: room)
     }
     
-    /// Claims the system call, finds a transport and joins the session, which puts our membership out.
-    private func joinSession(for callData: ElementCallData,
-                             room: any ElementCallRoomContextProtocol) async -> (MatrixRTCSession, MatrixRTCTransport)? {
+    /// Claims the system call, opens the room and joins its call, which puts our membership out.
+    private func joinCall(for callData: ElementCallData,
+                          room: any ElementCallRoomContextProtocol) async -> MatrixRTCCall? {
         // Claim the system call *before* our membership goes out: the incoming-call watcher reads
         // our own membership as "answered elsewhere" and would end the ringing call under us.
         // For an outgoing call this requests the start action; the system activates the audio session
@@ -409,50 +493,45 @@ public final class ElementCallController {
         }
         await system.startCall(roomID: room.roomID, displayName: room.displayName, isVideo: !callData.isAudioCall)
         
-        let transports: [MatrixRTCTransport]
+        // Pinned whatever the host prefers: a join in the other formats fails in an Element Call room
+        // that has no open MSC4143 slot, which is every one of them today, and nothing here opens one.
+        // Lifting this is a decision about who opens slots, not a setting.
+        let format = MatrixRTCMembershipFormat.roomState
+        if options.membershipFormat != format {
+            log(.warning, "membership format \(options.membershipFormat) is not supported yet, joining with \(format)")
+        }
+        
+        let rtcRoom: MatrixRTCRoom
         do {
-            transports = try await transport.rtcTransports(roomID: room.roomID)
+            rtcRoom = try await rtcClient.room(roomID: room.roomID, format: format)
         } catch {
-            fail("Could not discover the homeserver's RTC transports: \(error)")
+            fail("Could not open the room: \(error)")
             return nil
         }
-        log(.info, "homeserver offers \(transports)")
-        guard !Task.isCancelled else { return nil }
-        guard let mediaTransport = transports.first(where: {
-            if case .liveKit = $0 {
-                return true
-            } else {
-                return false
-            }
-        }) else {
-            fail("Homeserver offers no LiveKit transport")
+        self.rtcRoom = rtcRoom
+        guard !Task.isCancelled else {
+            await shutDownRoom()
             return nil
         }
         
-        let compat = options.elementCallCompatibility
-        log(.info, "joining with Element Call compatibility \(compat)")
-        
-        let session: MatrixRTCSession
+        let rtcCall: MatrixRTCCall
         do {
-            session = try await rtcService.joinSession(roomID: room.roomID,
-                                                       transport: mediaTransport,
-                                                       compat: compat,
-                                                       notify: notify(for: callData, room: room))
+            rtcCall = try await rtcRoom.joinCall(notify: notify(for: callData, room: room))
         } catch {
             fail("Join failed: \(error)")
             return nil
         }
+        self.rtcCall = rtcCall
         guard !Task.isCancelled else {
-            await abandon(session: session, roomID: room.roomID)
+            await abandon(rtcCall: rtcCall, roomID: room.roomID)
             return nil
         }
-        self.session = session
-        return (session, mediaTransport)
+        return rtcCall
     }
     
     /// Microphone, then camera for a video call. The call counts as connected once the microphone is up.
-    private func publishMedia(on call: MatrixRTCCall,
-                              session: MatrixRTCSession,
+    private func publishMedia(on call: MatrixRTCMediaSession,
+                              rtcCall: MatrixRTCCall,
                               room: any ElementCallRoomContextProtocol) async {
         // Where nothing else owns the session, we do: the simulator, and an iOS app on macOS,
         // where the host's system-call port is inert because CallKit is unavailable. Runtime
@@ -479,7 +558,7 @@ public final class ElementCallController {
             return
         }
         guard !Task.isCancelled else {
-            await abandon(session: session, call: call, roomID: room.roomID)
+            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
             return
         }
         log(.info, "connected as \(call.localMemberID)")
@@ -494,50 +573,22 @@ public final class ElementCallController {
             try? await call.setCameraEnabled(true)
         }
         guard !Task.isCancelled else {
-            await abandon(session: session, call: call, roomID: room.roomID)
+            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
             return
         }
         
         connection = .connected
         connectedAt = .now
-        updateSpotlight(speakers: [])
-        isLoudspeaker = CallAudioSessionConfigurator.isLoudspeaker
+        refreshAudioRoute()
         system.reportConnected(roomID: room.roomID)
     }
     
     private func handle(_ event: MatrixRTCCallEvent) {
-        switch event {
-        case .activeSpeakers(let speakers):
-            updateSpotlight(speakers: speakers.map(\.memberID))
-        case .streamStarted(let memberID, .screenShare):
-            spotlightMemberID = memberID
-        case .streamStopped(_, .screenShare), .participantLeft, .participantJoined, .streamStarted(_, .camera):
-            updateSpotlight(speakers: [])
-        case .ended:
-            // From a different task than the event collector: teardown cancels that task.
-            Task { await endCall(leave: false) }
-        default:
-            break
-        }
-    }
-    
-    /// A screen share wins; otherwise the loudest speaker other than us, keeping the current one
-    /// while they are still talking so tiles do not shuffle on every word.
-    private func updateSpotlight(speakers: [String]) {
-        guard let call else { return }
-        if let sharer = call.participants.first(where: { $0.isPublishing(.screenShare) }) {
-            spotlightMemberID = sharer.memberID
-            return
-        }
-        let remoteSpeakers = speakers.filter { $0 != call.localMemberID }
-        if let current = spotlightMemberID, remoteSpeakers.contains(current) {
-            return
-        }
-        if let loudest = remoteSpeakers.first {
-            spotlightMemberID = loudest
-        } else if spotlightMemberID == nil || !call.participants.contains(where: { $0.memberID == spotlightMemberID }) {
-            spotlightMemberID = call.participants.first { !$0.isLocal }?.memberID
-        }
+        // Everything else this switch used to carry existed only to recompute the spotlight, which
+        // the model now ranks and damps for us.
+        guard case .ended = event else { return }
+        // From a different task than the event collector: teardown cancels that task.
+        Task { await endCall(leave: false) }
     }
     
     /// Only when *starting* a call; joining one someone else started happens quietly. A direct chat
@@ -563,9 +614,14 @@ public final class ElementCallController {
     /// person, so it goes through the participant list to find the user first. Falls back to a
     /// bare profile, because a member can be in the call before their room membership has loaded.
     public func profile(forMemberID memberID: String) -> ElementCallMemberProfile? {
-        guard let participant = call?.participants.first(where: { $0.memberID == memberID }) else { return nil }
-        return room?.memberProfiles[participant.userID]
-            ?? ElementCallMemberProfile(userID: participant.userID, displayName: nil, avatarURL: nil)
+        guard let call else { return nil }
+        // The tile roster's references carry the user id for exactly this; our own tile is beside it.
+        let userID = call.tiles.order.first { $0.id.memberID == memberID }?.userID
+            ?? (call.ownTile?.memberID == memberID ? call.ownTile?.userID : nil)
+            ?? call.participants.first { $0.memberID == memberID }?.userID
+        guard let userID else { return nil }
+        return room?.memberProfiles[userID]
+            ?? ElementCallMemberProfile(userID: userID, displayName: nil, avatarURL: nil)
     }
     
     /// Forwards the caller's position rather than its own, or every line in this file would be
@@ -581,18 +637,25 @@ public final class ElementCallController {
     }
     
     /// Tears down what a join produced after the call was ended under it. Leaving is idempotent, so a
-    /// session that already left costs nothing to leave again.
-    private func abandon(session: MatrixRTCSession, call: MatrixRTCCall? = nil, roomID: String) async {
+    /// call that already left costs nothing to leave again.
+    private func abandon(rtcCall: MatrixRTCCall, call: MatrixRTCMediaSession? = nil, roomID: String) async {
         log(.info, "join of \(roomID) was cancelled, releasing what it set up")
         await call?.disconnect()
-        await session.leave()
-        await rtcService.release(roomID: roomID)
+        await rtcCall.leave()
+        await shutDownRoom()
         if self.call === call {
             self.call = nil
         }
-        if self.session === session {
-            self.session = nil
+        if self.rtcCall === rtcCall {
+            self.rtcCall = nil
         }
+    }
+    
+    /// Last, after the leave: the leave goes out through the room.
+    private func shutDownRoom() async {
+        let rtcRoom = rtcRoom
+        self.rtcRoom = nil
+        await rtcRoom?.shutdown()
     }
     
     private func endCall(leave: Bool) async {
@@ -604,16 +667,18 @@ public final class ElementCallController {
         eventsTask = nil
         pictureInPicture.unbind()
         
-        if let session {
+        if let rtcCall {
             if leave {
-                await session.leave()
+                await rtcCall.leave()
             } else {
-                await session.call?.disconnect()
+                await rtcCall.mediaSession?.disconnect()
             }
-            await rtcService.release(roomID: roomID)
         }
+        await shutDownRoom()
         call = nil
-        session = nil
+        rtcCall = nil
+        spotlightTileID = nil
+        isSpotlightTileExact = false
         system.endCall(roomID: roomID)
         // Paired with the activation in publishMedia through the same predicate, so the two
         // cannot disagree about which platforms they apply to and leave the session up.
@@ -632,7 +697,6 @@ public final class ElementCallController {
             connection = .ended
         }
         connectedAt = nil
-        spotlightMemberID = nil
         actionsSubject.send(.ended)
     }
     
@@ -651,11 +715,15 @@ public final class ElementCallController {
     func setPreviewState(callData: ElementCallData,
                          room: any ElementCallRoomContextProtocol,
                          connection: ElementCallConnection,
-                         connectedAt: Date? = nil) {
+                         connectedAt: Date? = nil,
+                         call: MatrixRTCMediaSession? = nil,
+                         rtcCall: MatrixRTCCall? = nil) {
         self.callData = callData
         self.room = room
         self.connection = connection
         self.connectedAt = connectedAt
+        self.call = call
+        self.rtcCall = rtcCall
         // The same seed `startCall` makes, so a preview of a connecting call draws the controls a
         // real one would: the camera reads as on for a video call from the moment it is joining,
         // which is what it will join with.

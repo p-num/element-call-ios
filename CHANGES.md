@@ -11,7 +11,159 @@ version will actually read it.
 
 ## Unreleased
 
-_Nothing yet._
+**`ElementCallActiveSpeakerGradient` is now `ElementCallBorderGradient.activeSpeaker`**, beside
+`.raisedHand`. A host theme that draws its own speaking ring can do the same for a raised hand by
+implementing `raisedHandBorder(in:)`; the default is design's.
+
+## 0.1.0-rc.10 - 2026-10-08
+
+**`MatrixRTCCall` is renamed `MatrixRTCMediaSession`, and `MatrixRTCElementCallCompat` is renamed
+`MatrixRTCMembershipFormat`.** The cases are `current`, `sticky2025` and `roomState` (were `off`,
+`stickyEvents` and `stateEvents`), and `ElementCallOptions.elementCallCompatibility` is
+`membershipFormat`.
+
+**The core is room-first, and the Matrix port is per room.** `ElementCallStack.start()` and `stop()`
+are gone: there is nothing to start. A host implementing `ElementCallMatrixTransportProtocol` itself
+implements `openRoom(roomID:)`, returning an `ElementCallMatrixRoomProtocol` that carries every room
+send and feed and is closed when the call ends; transport discovery moves onto the room as raw JSON.
+Every set-shaped feed delivers its current set first, an empty one included, and events cross as raw
+`ElementCallRoomEvent`s. Report failures as `MatrixRTCTransportError.failed` with the homeserver's
+`errcode` and status rather than classifying them, and `MatrixRTCToDeviceMessage.isSenderCrossSigned`
+is optional, nil when the client does not say. `ElementCallController.session` is `rtcCall`, a
+`MatrixRTCCall`, and a call whose slot is closed ends with `MatrixRTCEndReason.slotClosed`. Hosts using
+`ElementCallSDKTransport` change nothing but the `start()` call.
+
+**`ElementCallThemeProtocol` gains `activeSpeakerBorder(in:)`, the fill of the speaking ring.** It
+defaults to the design's gradient; implement it to brand the ring, returning one colour for a plain one.
+
+
+
+### What's Changed
+
+✨ Features
+* Show/Hide control bar behavior. by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/50
+* Show the matrix-rust-rtc version in the overflow menu by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/53
+* New optimized layout for small calls, 1:1 and less than 5 by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/55
+* Make the audio button a menu when a headset is connected by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/56
+
+🐛 Bugfixes
+* Fix: Draw the speaking ring as per design's gradient by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/54
+
+Others
+* Release 0.1.0-rc.9 by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/49
+
+
+**Full Changelog**: https://github.com/element-hq/element-call-ios/compare/0.1.0-rc.9...0.1.0-rc.10
+
+## 0.1.0-rc.9 - 2026-09-29
+
+**`ElementCallLayout` and `ElementCallScreenViewState.layout` are removed, and
+`ElementCallScreenViewState.spotlightID` is stored rather than computed.** The one-to-one arrangement
+(the other person full-bleed, ourselves as a thumbnail) is retired by the call layout spec: two people
+share the stage equally, in direct rooms too. The spotlight is no longer "the hero, else the head of
+the ranking": with nobody sharing and at most ten remote members there is no spotlight and every tile
+is the same size; above ten the spotlight follows the speaker. `ElementCallController.spotlightTileID`
+is written by the screen through `setSpotlightTile(_:)` and is nil whenever there is no spotlight, so
+a host reading it for Picture in Picture gets the window's own fallback rather than a guess.
+
+**The layout drives the core's cost controls.** `MatrixRTCCall.setDetailWindow(_:)` declares a
+`MatrixRTCDetailWindow` (a rank range plus explicit tiles) and `setVideoVisibility(paused:released:)`
+replaces `setReleasedVideoStreams(_:)` as the way the stage names what it is not showing; the old
+method remains as a shorthand. A host that drew the stage itself would have to declare both.
+`ElementCallScreenContext.shownHeroID` is the hero the user swiped to and `scrollRequest` asks the
+stage for an offset (for a harness; a host never needs it); the
+`elementCall.heroIndicator` identifier is new and public like the others. The harness types
+`MatrixRTCScenario`, `MatrixRTCScriptedSession`, `MatrixRTCScenarioPlayer` and `MatrixRTCManualClock`
+ship in `ElementCallKit` for the example app and the scenario tests, and `ElementCallController.fake`
+can carry a scripted call.
+
+**`MatrixRTCCallEvent.activeSpeakers` and `MatrixRTCSpeakingMember` are removed.** Speaking is
+`MatrixRTCTile.isSpeaking`. Remote audio playback follows the tile roster's `order` rather than
+`streamStarted`/`streamStopped`, so a lagging event consumer can no longer leave anyone silent.
+`MatrixRTCCall.participants` is read once at connect and no longer kept live; `hasVideo`,
+`pictureInPictureCandidate` and `pictureInPicturePlaceholderMemberID` read the tile roster instead, and the
+two static forms take `tiles:` rather than `participants:`. The stats overlay's `NO MIC STREAM` line is
+gone; the Kit still logs once, at warning, when a member's microphone cannot be opened.
+
+**`MatrixRTCCall.receiveStats` is keyed by `MatrixRTCStreamRef(memberID:, kind:)`, per stream, and
+covers only what is drawn.** It used to be keyed by member ID and hold the microphone counters alone, so
+a share tile showed its owner's audio and "frames dropped" was always zero. It now holds each drawn
+tile's own stream (`MatrixRTCStreamRef(tile.id)`) and its member's microphone (`kind: .microphone`), read
+in one core round trip a second for the tiles on the stage rather than one await per member. Tiles released by
+`setReleasedVideoStreams(_:)` are not polled.
+
+**`MatrixRTCTileRef` carries `userID`.** A tile outside the declared detail window has no
+`MatrixRTCTile`, but its reference now says whose it is, which is what a name and an avatar resolve
+through. Anything constructing a `MatrixRTCTileRef` passes it.
+
+**`ElementCallTile.audioLevel` is removed.** No view ever drew it, and projecting it made the call
+screen rebuild ten times a second, which left the top bar's menu dropping taps. Use `isSpeaking` if
+you need to know who is talking.
+
+**A screen share is now a tile of its own, and a tile is identified by member *and* stream.** The
+Rust core hands us a ranked list of call tiles rather than a participant list, and a member
+publishing a camera and a screen share is two of them, drawn at the same time. Ordering, its
+hysteresis and its coalescing are the model's now; this app renders the order it is given.
+
+For an interop rig driving accessibility identifiers, **nothing you pin has moved**, but there is
+more on screen than there was:
+
+| | |
+| --- | --- |
+| `elementCall.tile.<memberID>` | that member's **camera** — unchanged |
+| `elementCall.tile.<memberID>/screenShare` | that member's **screen** — new, and on the stage at the same time as their camera |
+
+Three consequences worth checking a rig for:
+
+- Collecting tile identifiers into a set, or counting tiles to count people, now sees two entries for
+  a sharer. This previously *under*-counted, silently, because both tiles carried one identifier.
+- Addressing a sharer's *picture* by their member ID now gets their camera. It used to get their
+  screen whenever the tile happened to be large, which was never something the identifier said.
+- A share tile appears and disappears with the share; it is not a state of a member's tile.
+
+For a host reading the view state:
+
+- `ElementCallTile.id` is `ElementCallTileID`-shaped (`MatrixRTCTileID`: a `memberID` and a `kind`)
+  rather than a `String`. `tile.memberID` still gives you the member.
+- `ElementCallTile.isScreenSharing` is gone — `tile.kind == .screenShare`, or `tile.isScreenShare`.
+- `ElementCallTile.hasMicrophone` and `.isFrontCamera` are gone. The core does not supply them per
+  tile and nothing drew them. The equivalents are still on the call:
+  `MatrixRTCParticipant.stream(.microphone)` and `MatrixRTCCall.isFrontCamera`.
+- `ElementCallTile.isHero` is new: the model marks the tile worth the largest slot.
+- `ElementCallScreenViewState.spotlightMemberID` is gone. The list is ranked, so the spotlight is
+  derived — read `ElementCallScreenViewState.spotlightID`.
+- `ElementCallScreenContext.fullscreenMemberID` is now `fullscreenTileID`.
+- `ElementCallController.spotlightMemberID` is now `spotlightTileID`, and is computed rather than
+  stored.
+- `MatrixRTCCall.setReleasedVideoMembers(_:)` is now `setReleasedVideoStreams(_:)` and takes tile
+  identities. Releasing by member took down a sharer's screen when their camera paged away.
+- `MatrixRTCCall.activeSpeakerIDs` is gone; speaking is a field on each tile.
+- `MatrixRTCCall.pictureInPictureCandidate(spotlightMemberID:)` and
+  `pictureInPicturePlaceholderMemberID(spotlightMemberID:)` take `spotlight:` as a tile identity; the
+  first returns one too.
+- `ElementCallPreviewFixtures.tile(...)` drops `hasMicrophone:` and `isScreenSharing:` and gains
+  `kind:` and `isHero:`; `ElementCallPreviewFixtures.share(_:)` builds a share tile;
+  `connected(spotlight:)` is gone, because the order of `tiles:` is the ranking.
+
+**`MatrixRTCCall.isScreenSharing` is now derived from publication state**, not from what the app
+asked for, so it goes false however a share ended. A capture stopped from outside the app — Control
+Centre, another app taking the recorder — now unpublishes rather than leaving a dead share published.
+
+
+
+### What's Changed
+
+✨ Features
+* Feat: New grid-layout with hero spotlight when needed by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/46
+
+🐛 Bugfixes
+* Fix: Legacy Format, stop inferring a sender device for key messages that name none by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/45
+
+🧱 Build
+* chore: Use the new core tiles model by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/41
+
+
+**Full Changelog**: https://github.com/element-hq/element-call-ios/compare/0.1.0-rc.8...0.1.0-rc.9
 
 ## 0.1.0-rc.8 - 2026-09-22
 
@@ -27,6 +179,59 @@ _Nothing yet._
 
 
 **Full Changelog**: https://github.com/element-hq/element-call-ios/compare/0.1.0-rc.7...0.1.0-rc.8
+
+**A screen share is now a tile of its own, and a tile is identified by member *and* stream.** The
+Rust core hands us a ranked list of call tiles rather than a participant list, and a member
+publishing a camera and a screen share is two of them, drawn at the same time. Ordering, its
+hysteresis and its coalescing are the model's now; this app renders the order it is given.
+
+For an interop rig driving accessibility identifiers, **nothing you pin has moved**, but there is
+more on screen than there was:
+
+| | |
+| --- | --- |
+| `elementCall.tile.<memberID>` | that member's **camera** — unchanged |
+| `elementCall.tile.<memberID>/screenShare` | that member's **screen** — new, and on the stage at the same time as their camera |
+
+Three consequences worth checking a rig for:
+
+- Collecting tile identifiers into a set, or counting tiles to count people, now sees two entries for
+  a sharer. This previously *under*-counted, silently, because both tiles carried one identifier.
+- Addressing a sharer's *picture* by their member ID now gets their camera. It used to get their
+  screen whenever the tile happened to be large, which was never something the identifier said.
+- A share tile appears and disappears with the share; it is not a state of a member's tile.
+
+For a host reading the view state:
+
+- `ElementCallTile.id` is a `MatrixRTCTileID`: a `memberID` and a `MatrixRTCTileKind`, `.person` or
+  `.screenShare` — what the tile *is*, not which stream. The stream a tile draws is
+  `kind.videoStreamKind`. `tile.memberID` still gives you the member.
+- `ElementCallTile.isScreenSharing` is gone — `tile.kind == .screenShare`, or `tile.isScreenShare`.
+- `ElementCallTile.hasMicrophone` and `.isFrontCamera` are gone. The core does not supply them per
+  tile and nothing drew them. The equivalents are still on the call:
+  `MatrixRTCParticipant.stream(.microphone)` and `MatrixRTCCall.isFrontCamera`.
+- `ElementCallTile.isHero` is new: the model marks the tile worth the largest slot.
+- `ElementCallScreenViewState.spotlightMemberID` is gone. The list is ranked, so the spotlight is
+  derived — read `ElementCallScreenViewState.spotlightID`.
+- `ElementCallScreenContext.fullscreenMemberID` is now `fullscreenTileID`.
+- `ElementCallController.spotlightMemberID` is now `spotlightTileID`, and is computed rather than
+  stored.
+- `MatrixRTCCall.setReleasedVideoMembers(_:)` is now `setReleasedVideoStreams(_:)` and takes tile
+  identities. Releasing by member took down a sharer's screen when their camera paged away.
+- `MatrixRTCCall.activeSpeakerIDs` is gone; speaking is a field on each tile.
+- `MatrixRTCTileRef` carries `userID`: a tile outside the declared detail window has no
+  `MatrixRTCTile`, but its reference still says whose it is, which is what a name and an avatar
+  resolve through. Anything constructing one passes it.
+- `MatrixRTCCall.pictureInPictureCandidate(spotlightMemberID:)` and
+  `pictureInPicturePlaceholderMemberID(spotlightMemberID:)` take `spotlight:` as a tile identity; the
+  first returns one too.
+- `ElementCallPreviewFixtures.tile(...)` drops `hasMicrophone:` and `isScreenSharing:` and gains
+  `kind:` and `isHero:`; `ElementCallPreviewFixtures.share(_:)` builds a share tile;
+  `connected(spotlight:)` is gone, because the order of `tiles:` is the ranking.
+
+**`MatrixRTCCall.isScreenSharing` is now derived from publication state**, not from what the app
+asked for, so it goes false however a share ended. A capture stopped from outside the app — Control
+Centre, another app taking the recorder — now unpublishes rather than leaving a dead share published.
 
 ## 0.1.0-rc.7 - 2026-09-21
 

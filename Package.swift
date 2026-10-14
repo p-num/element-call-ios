@@ -17,7 +17,7 @@ let package = Package(
         .library(name: "ElementCallMatrix", targets: ["ElementCallMatrix"])
     ],
     dependencies: [
-        .package(url: "https://github.com/element-hq/matrix-rust-rtc", exact: "0.3.0-rc.2"),
+        .package(url: "https://github.com/element-hq/matrix-rust-rtc", exact: "0.5.0-rc.4"),
         // .package(path: "../matrix-rust-rtc"),
         // The design *tokens*, not the Compound component library. Tokens are static values in
         // their own small package, so depending on them is safe. Compound itself is not, because its
@@ -31,14 +31,17 @@ let package = Package(
         // two exact requirements on one package have no solution, and the failure lands before anything
         // compiles. The upper bound is absurd on purpose; CI builds whatever Package.resolved holds.
         .package(url: "https://github.com/element-hq/compound-design-tokens", "11.0.0" ..< "100.0.0"),
-        // Use the same Letro SDK source and reviewed version as the host. It
-        // preserves Letro upload, room-marker and verification diagnostic APIs.
-        .package(url: "https://git.postnumber.com/letro/matrix-rust-components-swift", exact: "26.09.22-letro.1"),
+        // Share the host's Letro SDK identity and allow the host to advance its pin.
+        // The fork preserves upload, room-marker and verification diagnostic APIs.
+        .package(url: "https://git.postnumber.com/letro/matrix-rust-components-swift", "26.09.22-letro.1" ..< "100.0.0"),
         .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", exact: "1.19.4")
     ],
     targets: [
         .target(name: "ElementCallKit",
                 dependencies: [.product(name: "MatrixRtc", package: "matrix-rust-rtc")],
+                // Copied rather than processed: the files are Element Call web's, byte for byte, and
+                // Sounds/README.md pins them by hash.
+                resources: [.copy("Sounds")],
                 swiftSettings: [.defaultIsolation(MainActor.self)]),
         .target(name: "ElementCallHost",
                 dependencies: ["ElementCallKit",
@@ -70,6 +73,9 @@ let package = Package(
                                    "ElementCallMatrix",
                                    .product(name: "SnapshotTesting", package: "swift-snapshot-testing")],
                     exclude: ["__Snapshots__"],
+                    // The layout scenarios, vendored from feature-hq (plans/003.call_layout/scenarios).
+                    // Copied rather than processed so a file keeps its name and a dump can quote it.
+                    resources: [.copy("Scenarios")],
                     swiftSettings: [.defaultIsolation(MainActor.self)])
     ]
 )

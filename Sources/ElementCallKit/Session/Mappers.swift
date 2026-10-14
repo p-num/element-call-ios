@@ -30,21 +30,12 @@ nonisolated extension MatrixRTCStreamKind {
     }
 }
 
-nonisolated extension MatrixRTCElementCallCompat {
-    var ffi: FfiElementCallCompat {
+nonisolated extension MatrixRTCMembershipFormat {
+    var ffi: FfiMembershipFormat {
         switch self {
-        case .off: .off
-        case .stickyEvents: .stickyEvents
-        case .stateEvents: .stateEvents
-        }
-    }
-}
-
-nonisolated extension MatrixRTCTransport {
-    var ffi: FfiTransportConfig? {
-        switch self {
-        case .liveKit(let serviceURL): FfiTransportConfig(type: "livekit", livekitServiceUrl: serviceURL.absoluteString)
-        case .unsupported: nil
+        case .current: .current
+        case .sticky2025: .sticky2025
+        case .roomState: .roomState
         }
     }
 }
@@ -80,6 +71,68 @@ nonisolated extension MatrixRTCParticipant {
     }
 }
 
+nonisolated extension MatrixRTCTileKind {
+    init(_ kind: FfiTileKind) {
+        switch kind {
+        case .person: self = .person
+        case .screenShare: self = .screenShare
+        }
+    }
+    
+    var ffi: FfiTileKind {
+        switch self {
+        case .person: .person
+        case .screenShare: .screenShare
+        }
+    }
+}
+
+nonisolated extension MatrixRTCTileID {
+    init(_ id: FfiTileId) {
+        self.init(memberID: id.memberId, kind: .init(id.kind))
+    }
+}
+
+nonisolated extension MatrixRTCTile {
+    /// `isLocal` is ours to decide: the bindings' tile has no such field, because our own tile only
+    /// ever arrives on the local-state surface and is never in the ranked list. Comparing the member
+    /// rather than trusting the surface keeps the two answers from disagreeing.
+    init(_ tile: FfiCallTile, localMemberID: String) {
+        self.init(id: MatrixRTCTileID(memberID: tile.memberId, kind: .init(tile.kind)),
+                  userID: tile.userId,
+                  deviceID: tile.deviceId,
+                  isLocal: tile.memberId == localMemberID,
+                  isHero: tile.hero,
+                  hasVideo: tile.hasVideo,
+                  isMicrophoneMuted: tile.microphoneMuted,
+                  isSpeaking: tile.speaking,
+                  handRaisedAt: tile.handRaisedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                  handRaisedPosition: tile.handRaisedPosition.map(Int.init),
+                  isReachable: tile.reachable)
+    }
+}
+
+nonisolated extension MatrixRTCTileRoster {
+    init(_ roster: FfiTileRoster, localMemberID: String) {
+        // Keyed by identity on the way in, so nothing downstream is tempted to join by position.
+        // The two lists are the same length only while the detail window is the default one.
+        var detail = [MatrixRTCTileID: MatrixRTCTile](minimumCapacity: roster.detail.count)
+        for tile in roster.detail {
+            let mapped = MatrixRTCTile(tile, localMemberID: localMemberID)
+            detail[mapped.id] = mapped
+        }
+        self.init(order: roster.order.map { MatrixRTCTileRef(id: .init($0.id), userID: $0.userId, isHero: $0.hero) },
+                  detail: detail)
+    }
+}
+
+nonisolated extension MatrixRTCLocalState {
+    init(_ state: FfiLocalState, localMemberID: String) {
+        self.init(tile: MatrixRTCTile(state.tile, localMemberID: localMemberID),
+                  isScreenSharing: state.isScreenSharing)
+    }
+}
+
 nonisolated extension MatrixRTCReceiveStats {
     init(_ stats: FfiReceiveStats) {
         self.init(packetsReceived: stats.packetsReceived,
@@ -108,10 +161,10 @@ nonisolated extension MatrixRTCFrameEncryptionState {
 nonisolated extension MatrixRTCCallEvent {
     init(_ event: FfiCallEvent) {
         switch event {
-        case .participantJoined(let memberId, let userId):
-            self = .participantJoined(memberID: memberId, userID: userId)
-        case .participantLeft(let memberId):
-            self = .participantLeft(memberID: memberId)
+        case .participantJoined(let memberId, let userId, let participantCount):
+            self = .participantJoined(memberID: memberId, userID: userId, participantCount: Int(participantCount))
+        case .participantLeft(let memberId, let participantCount):
+            self = .participantLeft(memberID: memberId, participantCount: Int(participantCount))
         case .streamStarted(let memberId, let kind):
             self = .streamStarted(memberID: memberId, kind: .init(kind))
         case .streamStopped(let memberId, let kind):
@@ -120,8 +173,6 @@ nonisolated extension MatrixRTCCallEvent {
             self = .streamMuted(memberID: memberId, kind: .init(kind))
         case .streamUnmuted(let memberId, let kind):
             self = .streamUnmuted(memberID: memberId, kind: .init(kind))
-        case .activeSpeakers(let speakers):
-            self = .activeSpeakers(speakers.map { .init(memberID: $0.memberId, level: $0.level) })
         case .keyImported(let memberId, let keyIndex):
             self = .keyImported(memberID: memberId, keyIndex: keyIndex)
         case .frameEncryptionState(let memberId, let state, _):
@@ -144,6 +195,7 @@ nonisolated extension MatrixRTCCallEvent {
         case .ended(let reason):
             switch reason {
             case .left: self = .ended(.left)
+            case .slotClosed: self = .ended(.slotClosed)
             case .connectionClosed(let message): self = .ended(.connectionClosed(message: message))
             }
         }

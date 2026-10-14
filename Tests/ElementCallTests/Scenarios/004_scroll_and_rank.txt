@@ -1,0 +1,12 @@
+// A scrolled grid while ranks change across the composed band. Spec 003 R47–R49, R52–R58.
+0s     viewport 393x734 bottom 34
+0s     A#* B C D E F G H I J K L M N O P Q R S T U V W X Y Z
+1s     scroll 300                     // rows 2–3 visible; band ±1 viewport; window follows (R55)
+2s     tick
+3s     A#* Y! B C D E F G H I J K L M N O P Q R S T U V W X Z   // Y promoted from far below into the band: appears in place (R38), detail next delivery (R53)
+4s     tick
+5s     scroll 320                     // within the same row: no new window declared (row-quantised)
+6s     scroll 700                     // two rows further: window moves, top rows leave live → paused with hysteresis (R58)
+7s     tick
+9s     tick                           // 3 s later: rows beyond the band are released (linger)
+10s    A#* Y! B C D E F G H I J K L M N O P Q R S T U V X Z    // W leaves while scrolled near the end (R42)

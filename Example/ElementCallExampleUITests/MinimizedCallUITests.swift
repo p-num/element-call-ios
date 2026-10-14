@@ -26,7 +26,7 @@ final class MinimizedCallUITests: XCTestCase {
         super.setUp()
         continueAfterFailure = false
         app = XCUIApplication()
-        // No `-arrangement`, so the app opens on the catalogue and the fixture is chosen by tapping,
+        // No `-fixture`, so the app opens on the catalogue and the fixture is chosen by tapping,
         // which is the path a person takes.
         app.launch()
     }
@@ -57,7 +57,7 @@ final class MinimizedCallUITests: XCTestCase {
         let bar = app.buttons["elementCall.minimizedBar"]
         XCTAssertTrue(bar.waitForExistence(timeout: 5), "Minimizing should leave the call in the bar.")
         XCTAssertFalse(hasVisibleTiles(), "The stage should be gone while the call is minimized.")
-        XCTAssertTrue(app.buttons["example.fixture.oneToOne"].isHittable,
+        XCTAssertTrue(app.buttons["example.fixture.one_to_one"].isHittable,
                       "The catalogue should be reachable behind a minimized call, not merely visible.")
         
         bar.tap()
@@ -82,13 +82,32 @@ final class MinimizedCallUITests: XCTestCase {
         XCTAssertFalse(app.buttons["elementCall.minimizedBar"].exists,
                        "A call that ended is not a call that was minimized.")
         
-        app.buttons["example.fixture.joining"].tap()
+        // Below the fold: the connecting rows come after every connected one, and a tap does not
+        // scroll to its target.
+        let joining = app.buttons["example.fixture.joining"]
+        for _ in 0..<4 where !joining.isHittable {
+            app.swipeUp()
+        }
+        // Then all of it on screen, not merely some: `isHittable` is true for a row cut off by the
+        // bottom edge, and the tap goes to its centre, below the screen, and taps nothing. A short
+        // drag rather than another swipe, which scrolls a row clean past the top.
+        let screen = app.windows.firstMatch.frame
+        if !screen.contains(joining.frame) {
+            let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -200)))
+        }
+        // Said here rather than left to the tap, which on a row off screen taps nothing and fails
+        // the next line about a screen that never opened.
+        XCTAssertTrue(screen.contains(joining.frame), "The joining row should be on screen.")
+        joining.tap()
         XCTAssertTrue(app.buttons["elementCall.hangUp"].waitForExistence(timeout: 10),
                       "A connecting fixture should open its screen too.")
         
         app.buttons["elementCall.hangUp"].tap()
         
-        XCTAssertTrue(row.waitForExistence(timeout: 5),
+        // The catalogue comes back at the row just closed, not at the top, so that is the row to
+        // look for: one a long way above it is not built at all by a lazy list.
+        XCTAssertTrue(joining.waitForExistence(timeout: 5),
                       "A controller-driven call should come back to the catalogue as well.")
     }
 }

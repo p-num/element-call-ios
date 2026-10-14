@@ -158,6 +158,8 @@ struct PreviewTests {
                                  testName: String = #function,
                                  traits: UITraitCollection = .init(),
                                  preferences: SnapshotPreferences) -> String? {
+        // The flat fallback rather than glass: see `elementCallGlassEnabled`.
+        let view = AnyView(view.environment(\.elementCallGlassEnabled, false))
         let matchingView = isScreen ? AnyView(view) : AnyView(view
             .frame(width: device.size?.width)
             .fixedSize(horizontal: false, vertical: true))

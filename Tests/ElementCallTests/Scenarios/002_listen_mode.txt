@@ -1,0 +1,10 @@
+// Eleven remote members, nobody a hero: listen mode. Spec 003 R3–R9.
+0s     viewport 393x734 bottom 34
+0s     B C D E F G H I J K            // ten remote: no spotlight (R3)
+2s     B C D E F G H I J K L          // eleven: listen mode, nobody speaking yet, no speaker held
+4s     C! B D E F G H I J K L         // C speaks: spotlight C (R6)
+7s     C B D E F G H I J K L          // silence: C stays (R7)
+9s     E! C B D F G H I J K L         // E speaks: spotlight E
+11s    E! C B D F G H I J K           // L leaves: still eleven with us? no — ten remote: no spotlight (R3)
+13s    E! C B D F G H I J K L M       // back above X: E again at once (R5)
+15s    N#* E! C B D F G H I J K L M   // N shares: hero wins, speaker not spotlit (R9)

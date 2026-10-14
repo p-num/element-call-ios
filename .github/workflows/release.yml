@@ -124,8 +124,8 @@ jobs:
           VERSION: ${{ steps.prepare.outputs.version }}
           BRANCH: ${{ github.ref_name }}
         run: |
-          git config user.name "Element CI"
-          git config user.email "ci@element.io"
+          git config user.name "ElementBot"
+          git config user.email "android@element.io"
           git add CHANGES.md Sources/ElementCallKit/API/ElementCallVersion.swift
           git commit -m "Release $VERSION"
           git tag -a "$VERSION" -m "$VERSION"

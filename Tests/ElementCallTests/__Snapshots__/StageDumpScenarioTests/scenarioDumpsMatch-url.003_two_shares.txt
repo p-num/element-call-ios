@@ -1,0 +1,104 @@
+== 0s 0s     viewport 393x734 bottom 34
+window ranks 0..<0 also -  composed 1  subscribed 0  spotlight -  fullscreen -
+rank slot      rect                 vis      detail constraints
+-    float br  277,500,100,100      live     -      -
+
+== 0s 0s     A#* Av B! C D E F
+window ranks 1..<7 also A#  composed 8  subscribed 7  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    spot      0,0,393,221          live     detail enabled visible 784x448
+1    grid 0,1  203,233,175,131      live     detail enabled visible 352x256
+2    grid 1,0  16,376,175,131       live     detail enabled visible 352x256
+3    grid 1,1  203,376,175,131      live     detail enabled visible 352x256
+4    grid 2,0  16,519,175,131       live     detail enabled visible 352x256
+5    grid 2,1  203,519,175,131      live     detail enabled visible 352x256
+6    grid 3,0  16,662,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,233,175,131       live     -      -
+
+== 2s 2s     A#* M#* Av B! C D E F
+window ranks 2..<8 also A#  composed 8  subscribed 7  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    spot      0,0,393,221          live     detail enabled visible 784x448
+1    hidden    -                    released detail disabled hidden auto
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 3s 3s     swipe-hero next
+window ranks 2..<8 also M#  composed 8  subscribed 7  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      0,0,393,221          live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 5s 5s     M#* A#* Av B! C D E F
+window ranks 2..<8 also M#  composed 8  subscribed 7  spotlight M#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    spot      0,0,393,221          live     detail enabled visible 784x448
+1    hidden    -                    released detail enabled hidden 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 6s 6s     swipe-hero next
+window ranks 2..<8 also A#  composed 8  subscribed 7  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      0,0,393,221          live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 6s 6s     swipe-hero next
+window ranks 2..<8 also A#  composed 8  subscribed 7  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    hidden    -                    released detail enabled hidden 784x448
+1    spot      0,0,393,221          live     detail enabled visible 784x448
+2    grid 0,1  203,253,175,131      live     detail enabled visible 352x256
+3    grid 1,0  16,396,175,131       live     detail enabled visible 352x256
+4    grid 1,1  203,396,175,131      live     detail enabled visible 352x256
+5    grid 2,0  16,539,175,131       live     detail enabled visible 352x256
+6    grid 2,1  203,539,175,131      live     detail enabled visible 352x256
+7    grid 3,0  16,682,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,253,175,131       live     -      -
+
+== 8s 8s     A#* Av B! C D E F
+window ranks 1..<7 also A#  composed 8  subscribed 7  spotlight A#*  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    spot      0,0,393,221          live     detail enabled visible 784x448
+1    grid 0,1  203,233,175,131      live     detail enabled visible 352x256
+2    grid 1,0  16,376,175,131       live     detail enabled visible 352x256
+3    grid 1,1  203,376,175,131      live     detail enabled visible 352x256
+4    grid 2,0  16,519,175,131       live     detail enabled visible 352x256
+5    grid 2,1  203,519,175,131      live     detail enabled visible 352x256
+6    grid 3,0  16,662,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,233,175,131       live     -      -
+
+== 10s 10s    Av B! C D E F
+window ranks 0..<6 also -  composed 7  subscribed 6  spotlight -  fullscreen -
+rank slot      rect                 vis      detail constraints
+0    grid 0,1  203,0,175,131        live     detail enabled visible 352x256
+1    grid 1,0  16,143,175,131       live     detail enabled visible 352x256
+2    grid 1,1  203,143,175,131      live     detail enabled visible 352x256
+3    grid 2,0  16,286,175,131       live     detail enabled visible 352x256
+4    grid 2,1  203,286,175,131      live     detail enabled visible 352x256
+5    grid 3,0  16,429,175,131       live     detail enabled visible 352x256
+-    grid 0,0  16,0,175,131         live     -      -

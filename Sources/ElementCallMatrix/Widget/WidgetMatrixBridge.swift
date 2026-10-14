@@ -8,6 +8,7 @@
 import ElementCallHost
 import ElementCallKit
 import Foundation
+import Synchronization
 
 // Temporary: the widget-driver stopgap. The released SDK bindings lack delayed events, a room-state
 // feed and to-device messaging, but their widget driver implements all of them for Element Call web.
@@ -18,14 +19,14 @@ import Foundation
 //   - `Room.sendDelayedEvent` / `sendDelayedStateEvent` returning the delay ID, and
 //     `updateDelayedEvent(cancel|restart)`.
 //   - A room-state feed delivering the full list of a type per change, with event ID, sender, state
-//     key, timestamp and content.
+//     key, timestamp and content, and a timeline feed of raw message-like events and redactions.
 //   - `Client.sendToDeviceMessage` returning per-recipient failures.
 //   - `Client.subscribeToToDeviceMessages` delivering encryption info: attested sender, sender
 //     device ID and cross-signing status. The widget path gives only type, content, sender and
 //     whether it was encrypted, which is why the trust note on `toDeviceMessage(from:)` exists.
 //   - `Room.sendStickyRaw` (MSC4354), without which only the state-event compatibility mode works.
 //
-// Then give `ElementCallSDKTransport` direct SDK calls in place of its per-room bridge. Its
+// Then give `ElementCallSDKRoom` direct SDK calls in place of its bridge. `ElementCallSDKTransport`'s
 // `openBridge` is the only place a bridge is created, so that is the only seam to unpick.
 
 /// One widget driver for one room, as the RTC core's Matrix bridge.
@@ -40,6 +41,11 @@ import Foundation
 /// State arrives as deltas (`update_state` from sync, `send_event` for timeline-borne state) while the
 /// core wants the full state on every tick. Room state is replace-only, a leave being a present `{}`
 /// event, so the latest event per state key *is* the full state and the map below re-emits it whole.
+///
+/// The machine pushes the initial state of every granted type in one `update_state`, a type with no
+/// events included. Until that push nothing is known, so nothing is emitted; after it, an empty set
+/// is the truth and is emitted like any other. The core waits for a first set of every type before
+/// the room is ready, so holding back an empty one would stall the join.
 actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
     nonisolated let roomID: String
     
@@ -71,9 +77,15 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
     private var pending = [String: PendingRequest]()
     
     /// Event type → state key → latest event: the current state of every type we receive.
-    private var state = [String: [String: MatrixRTCRoomStateEvent]]()
-    private var stateSubscribers = [UUID: (eventType: String, continuation: AsyncStream<[MatrixRTCRoomStateEvent]>.Continuation)]()
-    private var toDeviceSubscribers = [UUID: AsyncStream<MatrixRTCToDeviceMessage>.Continuation]()
+    private var state = [String: [String: ElementCallRoomEvent]]()
+    /// Whether the machine's initial state push has arrived, after which `state` is complete.
+    private var hasInitialState = false
+    private var stateSubscribers = [UUID: (eventType: String, continuation: AsyncStream<[ElementCallRoomEvent]>.Continuation)]()
+    /// The feeds with no replay, unlike state: see ``LiveFeed``.
+    private nonisolated let toDeviceFeed = LiveFeed<MatrixRTCToDeviceMessage, Void>()
+    /// Filtered by event type.
+    private nonisolated let timelineFeed = LiveFeed<[ElementCallRoomEvent], Set<String>>()
+    private nonisolated let redactionFeed = LiveFeed<String, Void>()
     private let logger: (any ElementCallLoggingProtocol)?
     
     /// - Parameters:
@@ -179,29 +191,16 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
     
     /// MSC4515. The driver forwards this to `Client::discover_rtc_transports`, which reads the
     /// discovery endpoint and falls back to the well-known `rtc_foci`, with caching, so none of that
-    /// has to be reimplemented here.
-    func rtcTransports() async -> Result<[MatrixRTCTransport], MatrixRTCRoomBridgeError> {
+    /// has to be reimplemented here. Passed on verbatim: the core picks from it.
+    func rtcTransports() async -> Result<String, MatrixRTCRoomBridgeError> {
         await request(action: "org.matrix.msc4515.get_rtc_transports", data: [:]).flatMap { response in
-            guard let transports = response["rtc_transports"] as? [[String: Any]] else {
+            guard let transports = response["rtc_transports"] as? [Any],
+                  JSONSerialization.isValidJSONObject(transports),
+                  let data = try? JSONSerialization.data(withJSONObject: transports),
+                  let json = String(data: data, encoding: .utf8) else {
                 return .failure(.invalidResponse("no rtc_transports in the get_rtc_transports response"))
             }
-            return .success(Self.parseTransports(transports))
-        }
-    }
-    
-    /// Both the discovery endpoint and the well-known describe a transport the same way, so this is
-    /// the shape either source produces.
-    static func parseTransports(_ transports: [[String: Any]]) -> [MatrixRTCTransport] {
-        transports.compactMap { transport in
-            guard let type = transport["type"] as? String else { return nil }
-            if type == "livekit" {
-                guard let urlString = transport["livekit_service_url"] as? String,
-                      let url = URL(string: urlString) else { return nil }
-                return .liveKit(serviceURL: url)
-            }
-            // Kept rather than dropped: the core logs what it cannot use, which is the difference
-            // between a homeserver offering nothing and offering something we do not speak.
-            return .unsupported(type: type)
+            return .success(json)
         }
     }
     
@@ -220,8 +219,8 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
     
     // MARK: - Feeds
     
-    nonisolated func stateEvents(eventType: String) -> AsyncStream<[MatrixRTCRoomStateEvent]> {
-        let (stream, continuation) = AsyncStream<[MatrixRTCRoomStateEvent]>.makeStream()
+    nonisolated func stateEvents(eventType: String) -> AsyncStream<[ElementCallRoomEvent]> {
+        let (stream, continuation) = AsyncStream<[ElementCallRoomEvent]>.makeStream()
         let id = UUID()
         Task { await self.addStateSubscriber(id: id, eventType: eventType, continuation: continuation) }
         continuation.onTermination = { _ in
@@ -230,41 +229,31 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
         return stream
     }
     
-    nonisolated func toDeviceMessages() -> AsyncStream<MatrixRTCToDeviceMessage> {
-        let (stream, continuation) = AsyncStream<MatrixRTCToDeviceMessage>.makeStream()
-        let id = UUID()
-        Task { await self.addToDeviceSubscriber(id: id, continuation: continuation) }
-        continuation.onTermination = { _ in
-            Task { await self.removeToDeviceSubscriber(id: id) }
-        }
-        return stream
+    nonisolated func timelineEvents(eventTypes: [String]) -> AsyncStream<[ElementCallRoomEvent]> {
+        timelineFeed.subscribe(filter: Set(eventTypes))
     }
     
-    private func addStateSubscriber(id: UUID, eventType: String, continuation: AsyncStream<[MatrixRTCRoomStateEvent]>.Continuation) {
+    nonisolated func redactions() -> AsyncStream<String> {
+        redactionFeed.subscribe(filter: ())
+    }
+    
+    nonisolated func toDeviceMessages() -> AsyncStream<MatrixRTCToDeviceMessage> {
+        toDeviceFeed.subscribe(filter: ())
+    }
+    
+    private func addStateSubscriber(id: UUID, eventType: String, continuation: AsyncStream<[ElementCallRoomEvent]>.Continuation) {
         guard phase != .stopped else {
             continuation.finish()
             return
         }
         stateSubscribers[id] = (eventType, continuation)
-        if let current = state[eventType], !current.isEmpty {
-            continuation.yield(Array(current.values))
+        if hasInitialState {
+            continuation.yield(Array(state[eventType, default: [:]].values))
         }
     }
     
     private func removeStateSubscriber(id: UUID) {
         stateSubscribers[id] = nil
-    }
-    
-    private func addToDeviceSubscriber(id: UUID, continuation: AsyncStream<MatrixRTCToDeviceMessage>.Continuation) {
-        guard phase != .stopped else {
-            continuation.finish()
-            return
-        }
-        toDeviceSubscribers[id] = continuation
-    }
-    
-    private func removeToDeviceSubscriber(id: UUID) {
-        toDeviceSubscribers[id] = nil
     }
     
     // MARK: - Requests
@@ -341,10 +330,19 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
                     changedTypes.insert(eventType)
                 }
             }
+            if !hasInitialState {
+                // The initial push: every subscribed type now has a current set, empty or not.
+                hasInitialState = true
+                changedTypes.formUnion(stateSubscribers.values.map(\.eventType))
+            }
             changedTypes.forEach(emitSnapshot)
         case "send_event":
-            if data["state_key"] != nil, let eventType = upsert(data) {
-                emitSnapshot(of: eventType)
+            if data["state_key"] != nil {
+                if let eventType = upsert(data) {
+                    emitSnapshot(of: eventType)
+                }
+            } else {
+                deliverTimelineEvent(data)
             }
         case "send_to_device":
             deliverToDevice(data)
@@ -411,43 +409,71 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
     /// state key. One batch yields one snapshot, so emitting is the caller's.
     /// - Returns: the event type when the state changed.
     private func upsert(_ event: [String: Any]) -> String? {
-        guard let eventType = event["type"] as? String,
-              let stateKey = event["state_key"] as? String,
-              let sender = event["sender"] as? String,
-              let content = event["content"] as? [String: Any],
-              let contentJSON = Self.serialize(content) else {
+        guard let roomEvent = Self.roomEvent(from: event), let stateKey = roomEvent.stateKey else {
             log(.warning, "ignoring a malformed state event")
             return nil
         }
-        let eventID = event["event_id"] as? String
-        if let eventID, state[eventType]?[stateKey]?.eventID == eventID {
+        if state[roomEvent.eventType]?[stateKey]?.eventID == roomEvent.eventID {
             return nil // The same change through both routes.
         }
-        let timestamp = (event["origin_server_ts"] as? NSNumber).map { Date(timeIntervalSince1970: $0.doubleValue / 1000) }
-        state[eventType, default: [:]][stateKey] = MatrixRTCRoomStateEvent(eventID: eventID,
-                                                                           eventType: eventType,
-                                                                           stateKey: stateKey,
-                                                                           sender: sender,
-                                                                           originServerTimestamp: timestamp,
-                                                                           contentJSON: contentJSON)
-        return eventType
+        state[roomEvent.eventType, default: [:]][stateKey] = roomEvent
+        return roomEvent.eventType
     }
     
-    /// Hands subscribers the whole current state of the type.
+    /// Hands subscribers the whole current state of the type, empty included.
     private func emitSnapshot(of eventType: String) {
         let snapshot = Array(state[eventType, default: [:]].values)
-        guard !snapshot.isEmpty else { return }
         for (subscribedType, continuation) in stateSubscribers.values where subscribedType == eventType {
             continuation.yield(snapshot)
         }
     }
     
+    /// A message-like event from the timeline. A redaction names what it redacts at the top level
+    /// before room version 11 and in its content from then on.
+    private func deliverTimelineEvent(_ data: [String: Any]) {
+        guard let event = Self.roomEvent(from: data) else {
+            log(.warning, "ignoring a malformed timeline event")
+            return
+        }
+        if event.eventType == MatrixRTCEventTypes.redaction {
+            let content = data["content"] as? [String: Any]
+            guard let redacted = (data["redacts"] ?? content?["redacts"]) as? String else {
+                log(.warning, "ignoring a redaction that names no event")
+                return
+            }
+            redactionFeed.publish(redacted)
+            return
+        }
+        timelineFeed.publish([event]) { $0.contains(event.eventType) }
+    }
+    
+    /// The driver does not say whether a room event was encrypted, or by which device, so none is
+    /// claimed. That costs nothing for state, which is cleartext, nor for reactions, which the core
+    /// binds to their member by sender.
+    private nonisolated static func roomEvent(from event: [String: Any]) -> ElementCallRoomEvent? {
+        guard let eventType = event["type"] as? String,
+              let eventID = event["event_id"] as? String,
+              let sender = event["sender"] as? String,
+              let content = event["content"] as? [String: Any],
+              let contentJSON = serialize(content) else {
+            return nil
+        }
+        return ElementCallRoomEvent(eventID: eventID,
+                                    sender: sender,
+                                    eventType: eventType,
+                                    stateKey: event["state_key"] as? String,
+                                    originServerTimestamp: (event["origin_server_ts"] as? NSNumber)?.uint64Value ?? 0,
+                                    contentJSON: contentJSON,
+                                    encryptionInfo: nil)
+    }
+    
     /// The driver hands over `{type, content, sender, encrypted}` only: it has already dropped
     /// cleartext in an encrypted room and attested the sender of an encrypted message, but reports
     /// neither the sender's device nor whether it is cross-signed. The device is read from the key
-    /// message itself, or failing that from the sender's one live membership, and an encrypted
-    /// message is taken as cross-signed, the trust Element Call web gets through this same driver
-    /// (see this folder's header for what retires the stopgap).
+    /// message itself and from nowhere else: a key that names none is passed on with none, and the
+    /// core drops it, rather than being attributed to whatever device the sender's membership
+    /// happens to name. An encrypted message is taken as cross-signed, the trust Element Call web
+    /// gets through this same driver (see this folder's header for what retires the stopgap).
     private func deliverToDevice(_ data: [String: Any]) {
         guard let eventType = data["type"] as? String,
               let sender = data["sender"] as? String,
@@ -457,11 +483,10 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
             return
         }
         let wasEncrypted = data["encrypted"] as? Bool ?? false
-        let claimedDeviceID = Self.claimedDeviceID(in: content)
-        let deviceID = claimedDeviceID ?? membershipDeviceID(of: sender)
-        if claimedDeviceID == nil {
+        let deviceID = Self.claimedDeviceID(in: content)
+        if deviceID == nil {
             // Field names only, never values: which shape of key message the peer speaks.
-            log(.info, "\(eventType) from \(sender) names no device (fields: \(content.keys.sorted())), inferred \(deviceID ?? "none")")
+            log(.info, "\(eventType) from \(sender) names no device (fields: \(content.keys.sorted()))")
         }
         let message = MatrixRTCToDeviceMessage(eventType: eventType,
                                                attestedSenderID: sender,
@@ -469,7 +494,7 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
                                                isSenderCrossSigned: wasEncrypted,
                                                wasEncrypted: wasEncrypted,
                                                contentJSON: contentJSON)
-        toDeviceSubscribers.values.forEach { $0.yield(message) }
+        toDeviceFeed.publish(message)
     }
     
     /// The device the key message claims to come from: Element Call has written it at the top level
@@ -483,42 +508,6 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
         }
         let member = content["member"] as? [String: Any]
         return (member?["claimed_device_id"] ?? member?["device_id"]) as? String
-    }
-    
-    /// The device behind the user's live call membership, when there is exactly one. Element Call's
-    /// key messages do not always name their device, while the core refuses a key whose device it
-    /// cannot match to the membership.
-    private func membershipDeviceID(of userID: String) -> String? {
-        let memberships = (state[MatrixRTCEventTypes.legacyStateMember] ?? [:]).values.filter { $0.sender == userID && $0.contentJSON != "{}" }
-        var deviceIDs = Set<String>()
-        for membership in memberships {
-            if let content = Self.parseObject(membership.contentJSON) {
-                for case let entry as [String: Any] in content["memberships"] as? [Any] ?? [] {
-                    if let deviceID = entry["device_id"] as? String {
-                        deviceIDs.insert(deviceID)
-                    }
-                }
-            }
-            if deviceIDs.isEmpty, let deviceID = Self.deviceID(inStateKey: membership.stateKey, userID: userID) {
-                deviceIDs.insert(deviceID)
-            }
-        }
-        return deviceIDs.count == 1 ? deviceIDs.first : nil
-    }
-    
-    /// Element Call keys its membership `_{user}_{device}_m.call` (or `{user}_{device}`, or just the
-    /// user); the device is whatever follows the user ID.
-    private nonisolated static func deviceID(inStateKey stateKey: String, userID: String) -> String? {
-        var key = stateKey
-        if key.hasPrefix("_") {
-            key.removeFirst()
-        }
-        guard key.hasPrefix(userID + "_") else { return nil }
-        key.removeFirst(userID.count + 1)
-        if key.hasSuffix("_m.call") {
-            key.removeLast("_m.call".count)
-        }
-        return key.isEmpty ? nil : key
     }
     
     private func driverStopped() {
@@ -540,8 +529,9 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
         }
         stateSubscribers.values.forEach { $0.continuation.finish() }
         stateSubscribers.removeAll()
-        toDeviceSubscribers.values.forEach { $0.finish() }
-        toDeviceSubscribers.removeAll()
+        timelineFeed.close()
+        redactionFeed.close()
+        toDeviceFeed.close()
         channel = nil
     }
     
@@ -559,5 +549,58 @@ actor WidgetMatrixBridge: MatrixRTCRoomBridgeProtocol {
         guard JSONSerialization.isValidJSONObject(object),
               let data = try? JSONSerialization.data(withJSONObject: object, options: .sortedKeys) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+}
+
+/// Subscribers to a feed with no replay: a to-device message, a timeline event, a redaction. Unlike
+/// state, what arrives before a subscriber exists is gone, so a subscriber is registered under the
+/// lock before `subscribe` returns. One registered from a task of its own missed whatever arrived
+/// first -- a key exchange, on a loaded machine.
+private final nonisolated class LiveFeed<Element: Sendable, Filter: Sendable>: Sendable {
+    private struct Subscriber {
+        let filter: Filter
+        let continuation: AsyncStream<Element>.Continuation
+    }
+    
+    private struct State {
+        var subscribers = [UUID: Subscriber]()
+        /// Closed for good by the teardown; a subscriber after that is finished at once.
+        var isOpen = true
+    }
+    
+    private let state = Mutex(State())
+    
+    func subscribe(filter: Filter) -> AsyncStream<Element> {
+        let (stream, continuation) = AsyncStream<Element>.makeStream()
+        let id = UUID()
+        let isOpen = state.withLock { state in
+            if state.isOpen {
+                state.subscribers[id] = Subscriber(filter: filter, continuation: continuation)
+            }
+            return state.isOpen
+        }
+        guard isOpen else {
+            continuation.finish()
+            return stream
+        }
+        continuation.onTermination = { [weak self] _ in
+            _ = self?.state.withLock { $0.subscribers.removeValue(forKey: id) }
+        }
+        return stream
+    }
+    
+    func publish(_ element: Element, to matches: (Filter) -> Bool = { _ in true }) {
+        state.withLock { $0.subscribers.values }
+            .filter { matches($0.filter) }
+            .forEach { $0.continuation.yield(element) }
+    }
+    
+    func close() {
+        let subscribers = state.withLock { state in
+            state.isOpen = false
+            defer { state.subscribers.removeAll() }
+            return state.subscribers.values
+        }
+        subscribers.forEach { $0.continuation.finish() }
     }
 }

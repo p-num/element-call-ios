@@ -83,7 +83,7 @@ public final class VideoTileUIView: UIView {
         }
         backgroundColor = .black
         
-        metalView.device = renderer.map { _ in MTLCreateSystemDefaultDevice() } ?? nil
+        metalView.device = renderer.map { _ in I420MetalRenderer.device } ?? nil
         metalView.delegate = renderer
         metalView.framebufferOnly = true
         metalView.isPaused = true

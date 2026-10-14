@@ -30,19 +30,25 @@ extension WidgetDriverHandle: WidgetDriverChannel { }
 /// The machine stores whatever `acquireCapabilities` returns, so the strings answered to the
 /// `capabilities` request and the value returned here describe the same set.
 final nonisolated class WidgetCapabilityGrant: WidgetCapabilitiesProvider, Sendable {
+    /// Read and sent: the membership in the room-state format.
     static let stateEventTypes = [MatrixRTCEventTypes.legacyStateMember]
-    static let toDeviceEventTypes = [MatrixRTCEventTypes.encryptionKey, MatrixRTCEventTypes.legacyEncryptionKey]
+    /// Read only: the core reads slots in the other formats, and never opens one itself.
+    static let readOnlyStateEventTypes = MatrixRTCEventTypes.slot
+    static let toDeviceEventTypes = MatrixRTCEventTypes.encryptionKeys + [MatrixRTCEventTypes.legacyEncryptionKey]
     static let roomEventTypes = ["org.matrix.msc4075.call.notify",
                                  "org.matrix.msc4310.rtc.notification",
-                                 "m.rtc.notification",
-                                 "io.element.call.reaction",
-                                 "m.reaction"]
+                                 "m.rtc.notification"] + MatrixRTCEventTypes.reactions
+    /// Received from the timeline: other members' reactions and raised hands, and the redactions
+    /// that lower a hand.
+    static let receivedRoomEventTypes = MatrixRTCEventTypes.reactions + [MatrixRTCEventTypes.redaction]
     
     /// MSC2762 / MSC3819 / MSC4157 capability strings for the same set.
     static let capabilityStrings: [String] =
         stateEventTypes.flatMap { ["org.matrix.msc2762.receive.state_event:\($0)", "org.matrix.msc2762.send.state_event:\($0)"] }
+            + readOnlyStateEventTypes.map { "org.matrix.msc2762.receive.state_event:\($0)" }
             + toDeviceEventTypes.flatMap { ["org.matrix.msc3819.receive.to_device:\($0)", "org.matrix.msc3819.send.to_device:\($0)"] }
             + roomEventTypes.map { "org.matrix.msc2762.send.event:\($0)" }
+            + receivedRoomEventTypes.map { "org.matrix.msc2762.receive.event:\($0)" }
             + ["org.matrix.msc4157.send.delayed_event",
                "org.matrix.msc4157.update_delayed_event",
                "org.matrix.msc4515.rtc_transports"]
@@ -50,8 +56,10 @@ final nonisolated class WidgetCapabilityGrant: WidgetCapabilitiesProvider, Senda
     /// Called by the SDK on a blocking thread, once, during negotiation.
     func acquireCapabilities(capabilities: WidgetCapabilities) -> WidgetCapabilities {
         let stateFilters = Self.stateEventTypes.map { WidgetEventFilter.stateWithType(eventType: $0) }
+        let readOnlyStateFilters = Self.readOnlyStateEventTypes.map { WidgetEventFilter.stateWithType(eventType: $0) }
         let toDeviceFilters = Self.toDeviceEventTypes.map { WidgetEventFilter.toDevice(eventType: $0) }
-        return WidgetCapabilities(read: stateFilters + toDeviceFilters,
+        let receivedFilters = Self.receivedRoomEventTypes.map { WidgetEventFilter.messageLikeWithType(eventType: $0) }
+        return WidgetCapabilities(read: stateFilters + readOnlyStateFilters + toDeviceFilters + receivedFilters,
                                   send: stateFilters + toDeviceFilters + Self.roomEventTypes.map { .messageLikeWithType(eventType: $0) },
                                   requiresClient: false,
                                   updateDelayedEvent: true,

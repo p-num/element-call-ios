@@ -9,7 +9,7 @@ import Foundation
 import MatrixRtc
 import Synchronization
 
-/// Records what `MatrixRTCCall` asks of the transport, which is the only place the publish options
+/// Records what `MatrixRTCMediaSession` asks of the transport, which is the only place the publish options
 /// are observable: everything past this point is Rust.
 ///
 /// `FfiLocalTrack(noPointer:)` is the initialiser uniffi provides for exactly this -- the object
@@ -22,10 +22,21 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
     private struct State {
         var published: [FfiPublishOptions] = []
         var localMutes: [(kind: FfiStreamKind, muted: Bool)] = []
+        var detailWindows: [(offset: UInt32, len: UInt32, also: [FfiTileId])] = []
+        var constraints: [(stream: FfiStreamRef, constraints: FfiMediaConstraints)] = []
     }
     
     var published: [FfiPublishOptions] {
         state.withLock { $0.published }
+    }
+    
+    /// Every window the call declared, in order; the core republishes on each, so a repeat is a bug.
+    var detailWindows: [(offset: UInt32, len: UInt32, also: [FfiTileId])] {
+        state.withLock { $0.detailWindows }
+    }
+    
+    var constraints: [(stream: FfiStreamRef, constraints: FfiMediaConstraints)] {
+        state.withLock { $0.constraints }
     }
     
     var localMutes: [(kind: FfiStreamKind, muted: Bool)] {
@@ -58,6 +69,32 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         return nil
     }
     
+    /// Parks like `nextEvent()`, for the same reason.
+    func nextRoster() async -> FfiTileRoster? {
+        try? await Task.sleep(for: .seconds(3600))
+        return nil
+    }
+    
+    /// Parks like `nextEvent()`, for the same reason.
+    func nextLocalState() async -> FfiLocalState? {
+        try? await Task.sleep(for: .seconds(3600))
+        return nil
+    }
+    
+    func roster() -> FfiTileRoster {
+        FfiTileRoster(order: [], detail: [])
+    }
+    
+    func localState() -> FfiLocalState? {
+        nil
+    }
+    
+    func setRankingThreshold(tiles: UInt32) { }
+    
+    func setDetailWindow(offset: UInt32, len: UInt32, also: [FfiTileId]) {
+        state.withLock { $0.detailWindows.append((offset, len, also)) }
+    }
+    
     func participants() -> [FfiParticipant] {
         []
     }
@@ -66,7 +103,14 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         nil
     }
     
-    func setConstraints(memberId: String, kind: FfiStreamKind, constraints: FfiMediaConstraints) { }
+    func receiveStatsFor(streams: [FfiStreamRef]) async -> [FfiStreamStats] {
+        []
+    }
+    
+    func setConstraints(memberId: String, kind: FfiStreamKind, constraints: FfiMediaConstraints) {
+        state.withLock { $0.constraints.append((FfiStreamRef(memberId: memberId, kind: kind), constraints)) }
+    }
+    
     func unpublish(kind: FfiStreamKind) async throws { }
     func videoStream(memberId: String, kind: FfiStreamKind) -> VideoFrameStream? {
         nil

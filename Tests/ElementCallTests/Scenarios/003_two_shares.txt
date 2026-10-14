@@ -1,0 +1,10 @@
+// Two heroes stacked; the shown one leaves. Spec 003 R17, R19–R24, R60.
+0s     viewport 393x734 bottom 34
+0s     A#* Av B! C D E F
+2s     A#* M#* Av B! C D E F          // M starts sharing: A stays shown (R20)
+3s     swipe-hero next                // show M
+5s     M#* A#* Av B! C D E F          // heroes swap in the order: M still shown, by identity (R21)
+6s     swipe-hero next                // the stack follows the order (R20), so M is first now and next shows A
+6s     swipe-hero next                // at the end: nothing (R23)
+8s     A#* Av B! C D E F              // M leaves: A shown (R60), stack indicator gone
+10s    Av B! C D E F                  // A stops sharing: no hero, six remote: grid, no spotlight (R3)
