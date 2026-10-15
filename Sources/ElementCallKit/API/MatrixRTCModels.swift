@@ -7,22 +7,20 @@
 
 import Foundation
 
-public nonisolated enum MatrixRTCConstants {
-    /// The application every room call uses.
-    public static let callApplication = "m.call"
-    /// The slot Element Call opens for a room-wide call. MSC4143 requires the `{application}#` prefix.
-    public static let roomCallSlotID = "m.call#ROOM"
-}
-
 public nonisolated enum MatrixRTCEventTypes {
     /// MSC4143 membership, spec and unstable spellings.
     public static let member = ["m.rtc.member", "org.matrix.msc4143.rtc.member"]
     /// The pre-MSC4354 Element Call membership room state.
     public static let legacyStateMember = "org.matrix.msc3401.call.member"
-    /// MSC4143 media key to-device type.
-    public static let encryptionKey = "org.matrix.msc4143.rtc.encryption_key"
+    /// MSC4143 slots, spec and unstable spellings.
+    public static let slot = ["m.rtc.slot", "org.matrix.msc4143.rtc.slot"]
+    /// MSC4143 media key to-device type, spec and unstable spellings.
+    public static let encryptionKeys = ["m.rtc.encryption_key", "org.matrix.msc4143.rtc.encryption_key"]
     /// Element Call's own media key dialect (a `keys` array), sent *instead of* the spec type.
     public static let legacyEncryptionKey = "io.element.call.encryption_keys"
+    /// Element Call's reaction and raised hand, and the spec annotation it also reads.
+    public static let reactions = ["io.element.call.reaction", "m.reaction"]
+    public static let redaction = "m.room.redaction"
 }
 
 public nonisolated enum MatrixRTCStreamKind: Sendable, Hashable {
@@ -98,19 +96,14 @@ public nonisolated struct MatrixRTCStreamRef: Sendable, Hashable {
     }
 }
 
-/// How the membership is published, fixed for the lifetime of a session.
-public nonisolated enum MatrixRTCElementCallCompat: String, Sendable, CaseIterable, Codable {
+/// How the membership is published, fixed when the room is opened.
+public nonisolated enum MatrixRTCMembershipFormat: String, Sendable, CaseIterable, Codable {
     /// MSC4143 as it stands.
-    case off
+    case current
     /// Membership as an MSC4354 sticky event with legacy fields alongside.
-    case stickyEvents
+    case sticky2025
     /// `org.matrix.msc3401.call.member` room state and delayed state events; what Element Web speaks today.
-    case stateEvents
-}
-
-public nonisolated enum MatrixRTCTransport: Sendable, Hashable {
-    case liveKit(serviceURL: URL)
-    case unsupported(type: String)
+    case roomState
 }
 
 public nonisolated enum MatrixRTCCallIntent: String, Sendable {
@@ -220,6 +213,10 @@ public nonisolated struct MatrixRTCTile: Sendable, Hashable, Identifiable {
     public let isMicrophoneMuted: Bool
     public let isSpeaking: Bool
     public let handRaisedAt: Date?
+    /// The hand's place in the queue, 1 for the earliest still up, counted by the core over everyone
+    /// in the call rather than over the tiles in the window, so every client shows the same number
+    /// (009 R6). Never recomputed from ``handRaisedAt``.
+    public let handRaisedPosition: Int?
     public let isReachable: Bool
     
     public var memberID: String {
@@ -243,6 +240,7 @@ public nonisolated struct MatrixRTCTile: Sendable, Hashable, Identifiable {
                 isMicrophoneMuted: Bool = false,
                 isSpeaking: Bool = false,
                 handRaisedAt: Date? = nil,
+                handRaisedPosition: Int? = nil,
                 isReachable: Bool = true) {
         self.id = id
         self.userID = userID
@@ -253,6 +251,7 @@ public nonisolated struct MatrixRTCTile: Sendable, Hashable, Identifiable {
         self.isMicrophoneMuted = isMicrophoneMuted
         self.isSpeaking = isSpeaking
         self.handRaisedAt = handRaisedAt
+        self.handRaisedPosition = handRaisedPosition
         self.isReachable = isReachable
     }
 }
@@ -353,12 +352,17 @@ public nonisolated enum MatrixRTCFrameEncryptionState: Sendable, Hashable {
 
 public nonisolated enum MatrixRTCEndReason: Sendable, Hashable {
     case left
+    /// The slot the call was in was closed by a room administrator; the core left on its own.
+    case slotClosed
     case connectionClosed(message: String)
 }
 
 public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
-    case participantJoined(memberID: String, userID: String)
-    case participantLeft(memberID: String)
+    /// Someone joined while we were in the call: one per device, never the members already there
+    /// when we arrived. `participantCount` is the call's size after the change, ourselves included.
+    case participantJoined(memberID: String, userID: String, participantCount: Int)
+    /// Someone left while we were in the call; never as the call ends for us.
+    case participantLeft(memberID: String, participantCount: Int)
     case streamStarted(memberID: String, kind: MatrixRTCStreamKind)
     case streamStopped(memberID: String, kind: MatrixRTCStreamKind)
     case streamMuted(memberID: String, kind: MatrixRTCStreamKind)
@@ -450,11 +454,10 @@ public nonisolated struct MatrixRTCOpenIDToken: Sendable {
 }
 
 public nonisolated enum MatrixRTCError: Error, Sendable {
-    case notStarted
-    case alreadyJoined(roomID: String)
-    case notJoined
-    case noLiveKitTransport
-    case malformedSlotID(String)
+    /// The room did not become ready: some feed of the transport's room never delivered.
+    case roomNotReady(roomID: String)
+    /// The join was refused because the room's slot for calls is closed.
+    case slotClosed(String)
     case ffi(String)
     case media(String)
     /// The host could not set up its Matrix side for the room.

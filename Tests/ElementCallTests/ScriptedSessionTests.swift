@@ -61,6 +61,33 @@ struct ScriptedSessionTests {
     /// The camera button during a scenario: a scripted call has no device to open (on a phone the
     /// example app has no camera usage string, and opening it aborted the process), so turning the
     /// camera on or flipping it changes the call's state only.
+    /// A scenario has no raise times, so the queue is the roster's order with ours last, and ours
+    /// moves up as hands ahead of it come down: Android's harness numbers the same way (009 C7).
+    @Test
+    func handsAreNumberedInRosterOrderWithOursLast() async throws {
+        let scenario = try MatrixRTCScenario.parse("0s B^ C D^\n1s me ^\n2s C D^", name: "t")
+        let player = MatrixRTCScenarioPlayer(scenario: scenario)
+        await player.start()
+        
+        _ = await player.step()
+        #expect(player.call.tiles.detail[a("B")]?.handRaisedPosition == 1)
+        #expect(player.call.tiles.detail[a("C")]?.handRaisedPosition == nil)
+        #expect(player.call.tiles.detail[a("D")]?.handRaisedPosition == 2)
+        _ = await player.step()
+        try await waitFor { player.call.ownTile?.handRaisedPosition == 3 }
+        _ = await player.step()
+        #expect(player.call.tiles.detail[a("D")]?.handRaisedPosition == 1)
+        try await waitFor { player.call.ownTile?.handRaisedPosition == 2 }
+        await player.call.disconnect()
+    }
+    
+    private func waitFor(_ condition: () -> Bool) async throws {
+        for _ in 0..<200 where !condition() {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        try #require(condition())
+    }
+    
     @Test
     func theCameraTurnsOnAndFlipsWithoutADevice() async throws {
         let scenario = try MatrixRTCScenario.parse("0s B", name: "t")

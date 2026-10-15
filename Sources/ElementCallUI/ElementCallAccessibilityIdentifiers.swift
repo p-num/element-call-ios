@@ -76,7 +76,7 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         case .endCall: hangUp
         case .micOn, .micOff: microphone
         case .videoCall, .videoCallOff: camera
-        case .volumeOn, .volumeOff: audioOutput
+        case .volumeOn, .volumeOff, .headphones, .bluetooth: audioOutput
         case .shareScreen: screenShare
         case .collapse: minimize
         case .overflow: more

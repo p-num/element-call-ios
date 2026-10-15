@@ -22,12 +22,12 @@ struct RosterPlaybackTests {
     @Test
     func everyRemotePersonTileIsACandidateOnce() {
         let order = [ref("frank", kind: .screenShare), ref("frank"), ref("bob")]
-        #expect(MatrixRTCCall.playbackCandidates(order, localMemberID: me) == ["frank", "bob"])
+        #expect(MatrixRTCMediaSession.playbackCandidates(order, localMemberID: me) == ["frank", "bob"])
     }
     
     /// The order never holds our own tile, but the id guard holds even if it did.
     @Test
     func weAreNeverACandidate() {
-        #expect(MatrixRTCCall.playbackCandidates([ref(me)], localMemberID: me).isEmpty)
+        #expect(MatrixRTCMediaSession.playbackCandidates([ref(me)], localMemberID: me).isEmpty)
     }
 }

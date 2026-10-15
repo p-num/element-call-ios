@@ -69,8 +69,8 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     private var automaticStartTask: Task<Void, Never>?
     /// Whether a failed start is worth one more attempt. See ``start()``.
     private var pendingStartRetry = false
-    private weak var call: MatrixRTCCall?
-    private var spotlightProvider: (() -> MatrixRTCTileID?)?
+    private weak var call: MatrixRTCMediaSession?
+    private var spotlightProvider: (() -> (tileID: MatrixRTCTileID?, isExact: Bool))?
     
     override init() {
         super.init()
@@ -105,7 +105,7 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     }
     
     /// Binds to a call; the spotlight provider is read whenever the call's video state changes.
-    func bind(call: MatrixRTCCall, spotlightProvider: @escaping () -> MatrixRTCTileID?) {
+    func bind(call: MatrixRTCMediaSession, spotlightProvider: @escaping () -> (tileID: MatrixRTCTileID?, isExact: Bool)) {
         self.call = call
         self.spotlightProvider = spotlightProvider
         if pictureInPictureController == nil, AVPictureInPictureController.isPictureInPictureSupported() {
@@ -160,7 +160,8 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     /// is honoured.
     @discardableResult
     private func applyPreferredSizeForCurrentSource() -> MatrixRTCTileID? {
-        let candidate = call?.pictureInPictureCandidate(spotlight: spotlightProvider?())
+        let spotlight = spotlightProvider?()
+        let candidate = call?.pictureInPictureCandidate(spotlight: spotlight?.tileID, isExact: spotlight?.isExact ?? false)
         if let call, let candidate, let aspect = call.videoAspect(memberID: candidate.memberID, kind: candidate.kind.videoStreamKind) {
             applyPreferredSize(aspect: aspect)
         } else if candidate == nil {
@@ -324,10 +325,12 @@ final class ElementCallPictureInPictureController: NSObject, AVPictureInPictureC
     
     private func updateVideoSource() {
         guard let call else { return }
-        let candidate = call.pictureInPictureCandidate(spotlight: spotlightProvider?())
+        let spotlight = spotlightProvider?()
+        let candidate = call.pictureInPictureCandidate(spotlight: spotlight?.tileID, isExact: spotlight?.isExact ?? false)
         if candidate == nil {
-            // Nobody has video: show who we are in the call with instead of a black window.
-            let shown = call.pictureInPicturePlaceholderMemberID(spotlight: spotlightProvider?())
+            // Nobody has video, or the person named has none: show who we are in the call with
+            // instead of a black window.
+            let shown = call.pictureInPicturePlaceholderMemberID(spotlight: spotlight?.tileID)
             placeholderHost.rootView = placeholderProvider?(shown) ?? AnyView(Color.black)
             placeholderHost.view.isHidden = false
         } else {

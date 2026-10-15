@@ -1,9 +1,11 @@
-// Alone, then two, then three, then the grid. Spec 003 R2, R34–R36, 002 R18/R19.
+// Alone, then two, three, four and five people in the small-call layout, then six in the grid.
+// Spec 019 R1–R6, R11; 003 R2.
 0s     viewport 393x734 bottom 34
 0s
 1s     B
 3s     B C
 5s     B C D
+6s     B C D E
 7s     B C D E F
 8s     rotate landscape
 9s     rotate portrait

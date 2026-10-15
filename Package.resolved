@@ -1,5 +1,5 @@
 {
-  "originHash" : "dc143cd3f08e5b2dcd236bb974a21968978de87e42e31f884812c994e7e279d9",
+  "originHash" : "5da5a81275fddeb7db5f910f9f74b3482ed9d349f13e37f677021410b829d254",
   "pins" : [
     {
       "identity" : "compound-design-tokens",
@@ -13,19 +13,19 @@
     {
       "identity" : "matrix-rust-components-swift",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/matrix-rust-components-swift",
+      "location" : "https://git.postnumber.com/letro/matrix-rust-components-swift",
       "state" : {
-        "revision" : "bd4fe022902bb3c3cbeb017cbf60516b6ef7f6f0",
-        "version" : "26.9.8"
+        "revision" : "6ec2c0d275bc2e5746795496151b669c547e3561",
+        "version" : "26.10.13-letro.1"
       }
     },
     {
       "identity" : "matrix-rust-rtc",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/matrix-rust-rtc",
+      "location" : "https://github.com/p-num/matrix-rust-rtc",
       "state" : {
-        "revision" : "a889df4e8a2e5ff328cadc985b6647288a104704",
-        "version" : "0.4.0-rc.1"
+        "revision" : "76f120b874f2e60f3f3106df42dbabc944e2897a",
+        "version" : "0.5.0-rc.4-letro.1"
       }
     },
     {

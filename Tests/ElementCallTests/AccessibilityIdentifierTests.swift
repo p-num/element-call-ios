@@ -66,7 +66,7 @@ nonisolated struct AccessibilityIdentifierTests {
     func distinctness() {
         let paired: [Set<ElementCallIcon>] = [[.micOn, .micOff],
                                               [.videoCall, .videoCallOff],
-                                              [.volumeOn, .volumeOff]]
+                                              [.volumeOn, .volumeOff, .headphones, .bluetooth]]
         var seen = [String: ElementCallIcon]()
         for icon in ElementCallIcon.allCases {
             let identifier = ElementCallAccessibilityIdentifiers.control(for: icon)

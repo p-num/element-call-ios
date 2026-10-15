@@ -9,7 +9,7 @@ import Foundation
 import MatrixRtc
 import Synchronization
 
-/// Records what `MatrixRTCCall` asks of the transport, which is the only place the publish options
+/// Records what `MatrixRTCMediaSession` asks of the transport, which is the only place the publish options
 /// are observable: everything past this point is Rust.
 ///
 /// `FfiLocalTrack(noPointer:)` is the initialiser uniffi provides for exactly this -- the object
@@ -88,6 +88,8 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
     func localState() -> FfiLocalState? {
         nil
     }
+    
+    func setRankingThreshold(tiles: UInt32) { }
     
     func setDetailWindow(offset: UInt32, len: UInt32, also: [FfiTileId]) {
         state.withLock { $0.detailWindows.append((offset, len, also)) }

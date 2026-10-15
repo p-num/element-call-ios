@@ -27,7 +27,9 @@ public nonisolated struct ElementCallTile: Identifiable, Equatable, Sendable {
     /// Loud enough to count as talking. A threshold crossing, not a level: nothing continuous
     /// belongs in a tile, which the whole screen is rebuilt to redraw.
     public let isSpeaking: Bool
-    public let hasHandRaised: Bool
+    /// The hand's place in the queue, as the core numbers it (009 R6); nil with the hand down, or
+    /// where no hand is shown (R33).
+    public let handPosition: Int?
     /// The model marks the tile worth the largest slot — a screen share today, a pin later. It does
     /// not choose a spotlight; `ElementCallSpotlight` is where that is decided.
     public let isHero: Bool
@@ -43,6 +45,10 @@ public nonisolated struct ElementCallTile: Identifiable, Equatable, Sendable {
     
     public var isScreenShare: Bool {
         id.kind == .screenShare
+    }
+    
+    public var hasHandRaised: Bool {
+        handPosition != nil
     }
 }
 
@@ -76,11 +82,40 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     public var isCameraEnabled = false
     public var isFrontCamera = true
     public var isScreenSharing = false
-    public var isLoudspeaker = false
+    /// Everywhere the call can come out of, external hardware first. See `ElementCallController`.
+    public var audioOutputs: [CallAudioOutput] = []
+    public var audioOutput: CallAudioOutput?
     public var isMediaDegraded = false
     public var isTileStatsVisible = false
     public var isDeveloperModeEnabled = false
     public var isScreenSharingEnabled = false
+    /// Our hand as the other participants see it, from our own tile (009 R5).
+    public var isHandRaised = false
+    /// A raise or a lower is with the homeserver; the control shows progress and takes no taps.
+    public var isHandPending = false
+    /// Joined: there is a membership to put a hand on.
+    public var isHandRaiseAvailable = false
+    
+    /// One other person, filling the stage (019 R4). Nobody to queue behind, and no edge of the
+    /// tile's own for a ring, so no hand is shown or offered (009 R33).
+    public var isOneToOne: Bool {
+        ElementCallSmallCallLayout.isFullBleed(tiles)
+    }
+    
+    /// The tiles as the screen shows them: with no hands in a one-to-one call, where the hands are
+    /// still up but not drawn (009 R33). Applied by the view model, the previews and the harness
+    /// alike, since only the tile list says whether a call is one-to-one.
+    static func showingHands(_ tiles: [ElementCallTile]) -> [ElementCallTile] {
+        ElementCallSmallCallLayout.isFullBleed(tiles) ? tiles.map { $0.withHandHidden() } : tiles
+    }
+    
+    /// From three people, ourselves included: alone or one-to-one there is nobody to queue behind
+    /// (009 R33). People rather than tiles, since a share is a second tile for one person. Unless
+    /// our hand is already up from before: it must always be possible to lower it (009 R2).
+    public var showsRaiseHandControl: Bool {
+        isHandRaiseAvailable && (tiles.count { !$0.isScreenShare } >= 3 || isHandRaised)
+    }
+    
     /// False while minimized, in the bar or the system window: the tiles unmount so only the window decodes.
     public var isMaximized = true
     
@@ -91,9 +126,32 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     /// and this is the one copy the stage, the Picture in Picture window and the tests all read.
     /// Never ourselves, and never the head of the ranking just for being the head of it.
     public var spotlightID: MatrixRTCTileID?
+    /// Who the small-call layout raises and Picture in Picture follows (019 R9, R15). Stored for the
+    /// reason `spotlightID` is: it holds the last speaker through silence.
+    public var smallCallSpeakerID: MatrixRTCTileID?
+    /// Whether the device has a camera on each side, so the flip button means something (019 R24).
+    public var canSwitchCamera = false
+    
+    /// The tile the Picture in Picture window continues, and whether it must be that one. In a
+    /// small call it is the speaker, else the first to arrive, else ourselves, and exactly that
+    /// tile (019 R15); otherwise the spotlight, with the window's own fallbacks (003 R68).
+    public var pictureInPictureTile: (id: MatrixRTCTileID?, isExact: Bool) {
+        guard ElementCallSmallCallLayout.applies(to: tiles) else { return (spotlightID, false) }
+        return (ElementCallSmallCallLayout.pictureInPictureTile(tiles: tiles, speakerID: smallCallSpeakerID), true)
+    }
     
     public var isVideoCall: Bool {
         isCameraEnabled || tiles.contains { $0.hasVideo || $0.isScreenShare }
+    }
+    
+    public var isLoudspeaker: Bool {
+        audioOutput?.kind == .speaker
+    }
+    
+    /// With only the phone's own outputs the choice is speaker or not, and the control bar toggles;
+    /// a headset, wired, Bluetooth or a car makes it a menu.
+    public var hasExternalAudioOutput: Bool {
+        audioOutputs.contains { !$0.isBuiltIn }
     }
 }
 
@@ -110,9 +168,40 @@ extension ElementCallTile {
                         isMicrophoneMuted: isMicrophoneMuted,
                         hasVideo: hasVideo,
                         isSpeaking: isSpeaking,
-                        hasHandRaised: hasHandRaised,
+                        handPosition: handPosition,
                         isHero: isHero,
                         stats: stats)
+    }
+    
+    /// A copy with no hand shown, whoever's tile it is; the hand is still up (009 R33).
+    nonisolated func withHandHidden() -> ElementCallTile {
+        ElementCallTile(id: id,
+                        userID: userID,
+                        displayName: displayName,
+                        avatarURL: avatarURL,
+                        isLocal: isLocal,
+                        isMicrophoneMuted: isMicrophoneMuted,
+                        hasVideo: hasVideo,
+                        isSpeaking: isSpeaking,
+                        handPosition: nil,
+                        isHero: isHero,
+                        stats: stats)
+    }
+    
+    /// Our own hand, for the harness, which has no call to read it back from.
+    func withHandPosition(_ handPosition: Int?) -> ElementCallTile {
+        guard isLocal else { return self }
+        return ElementCallTile(id: id,
+                               userID: userID,
+                               displayName: displayName,
+                               avatarURL: avatarURL,
+                               isLocal: isLocal,
+                               isMicrophoneMuted: isMicrophoneMuted,
+                               hasVideo: hasVideo,
+                               isSpeaking: isSpeaking,
+                               handPosition: handPosition,
+                               isHero: isHero,
+                               stats: stats)
     }
     
     /// Our own mute and camera, taken from the controls rather than from the tile; anyone else's
@@ -131,7 +220,7 @@ extension ElementCallTile {
                                isMicrophoneMuted: isMicrophoneMuted,
                                hasVideo: hasVideo,
                                isSpeaking: isSpeaking,
-                               hasHandRaised: hasHandRaised,
+                               handPosition: handPosition,
                                isHero: isHero,
                                stats: stats)
     }
@@ -143,6 +232,8 @@ public nonisolated enum ElementCallScreenViewAction: Sendable {
     case switchCamera
     case toggleScreenShare
     case toggleLoudspeaker
+    case toggleRaisedHand
+    case selectAudioOutput(CallAudioOutput)
     case toggleTileStats
     case minimize
     case hangUp

@@ -91,7 +91,12 @@ final class OverflowMenuUITests: XCTestCase {
         
         let version = app.descendants(matching: .any)
             .matching(NSPredicate(format: "label BEGINSWITH 'version: '")).firstMatch
-        XCTAssertTrue(version.waitForExistence(timeout: 3), "The menu should end with the package version.")
+        XCTAssertTrue(version.waitForExistence(timeout: 3), "The menu should name the package version.")
         XCTAssertFalse(version.isEnabled, "The version is a label, not an action.")
+        
+        let core = app.descendants(matching: .any)
+            .matching(NSPredicate(format: "label CONTAINS 'matrix-rust-rtc '")).firstMatch
+        XCTAssertTrue(core.exists, "The menu should name the matrix-rust-rtc version, as Android's does.")
+        XCTAssertFalse(core.isEnabled, "The version is a label, not an action.")
     }
 }

@@ -1,7 +1,7 @@
 == 0s 0s     viewport 393x734 bottom 34
 window ranks 0..<0 also -  composed 1  subscribed 0  spotlight -  fullscreen -
 rank slot      rect                 vis      detail constraints
--    grid 0,0  16,0,361,604         live     -      -
+-    float br  277,500,100,100      live     -      -
 
 == 0s 0s     B C D E F G H I J K
 window ranks 0..<10 also -  composed 11  subscribed 10  spotlight -  fullscreen -

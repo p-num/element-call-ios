@@ -78,7 +78,7 @@ public nonisolated struct MatrixRTCScenario: Sendable, Equatable {
         case minimize
         case restore
         /// Our own camera and microphone.
-        case me(hasVideo: Bool, isMicrophoneMuted: Bool)
+        case me(hasVideo: Bool, isMicrophoneMuted: Bool, hasHandRaised: Bool = false)
         /// The next rosters carry detail only for these tiles; everything else is a reference.
         case detailOnly([MatrixRTCTileID])
         /// No change; forces a dump at this time, to observe something on the call's own clock.
@@ -242,10 +242,10 @@ public nonisolated struct MatrixRTCScenario: Sendable, Equatable {
             return .restore
         case "me":
             let flags = arguments.first ?? ""
-            for flag in flags where flag != "v" && flag != "m" {
-                throw fail("`\(flag)` is not a flag for me (v m)")
+            for flag in flags where !"vm^".contains(flag) {
+                throw fail("`\(flag)` is not a flag for me (v m ^)")
             }
-            return .me(hasVideo: flags.contains("v"), isMicrophoneMuted: flags.contains("m"))
+            return .me(hasVideo: flags.contains("v"), isMicrophoneMuted: flags.contains("m"), hasHandRaised: flags.contains("^"))
         case "detail-only":
             return try .detailOnly(arguments.map { try parseToken($0, fail: fail).tileID })
         case "tick":

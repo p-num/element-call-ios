@@ -11,7 +11,7 @@ import Synchronization
 /// A clock that only moves when told to, so a test can walk a call through its release linger and
 /// its stats poll one frame at a time, and the example harness can scrub through a scenario.
 ///
-/// `MatrixRTCCall` sleeps on an injected clock rather than on `Task.sleep` for exactly this: the
+/// `MatrixRTCMediaSession` sleeps on an injected clock rather than on `Task.sleep` for exactly this: the
 /// rules the layout is tested against are about *when* a stream is released relative to a scroll,
 /// and a test that waited three real seconds per frame would never be run.
 ///

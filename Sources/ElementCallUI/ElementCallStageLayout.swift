@@ -23,10 +23,24 @@ struct ElementCallTilePlacement: Identifiable, Equatable {
     /// is not in the order.
     var orderIndex: Int?
     var zIndex: Double
+    /// How the picture sits in the frame. Last and defaulted so the grid's placements need not say.
+    var contentFit: ElementCallTileFit = .standard
     
     var id: MatrixRTCTileID {
         tile.id
     }
+}
+
+/// How a placement asks its picture to sit in the frame.
+///
+/// A rule rather than a value because the layout cannot see a remote stream's shape, for the reason
+/// the full-screen arrangement gives: the tile resolves it against the aspect its renderer reports.
+enum ElementCallTileFit: Equatable {
+    /// The tile's own rule: a camera fills, a share fits, the spotlight sits between the two.
+    case standard
+    /// Shown whole when the picture is landscape and the frame is not, filled otherwise: the one
+    /// exception R4 makes to filling the screen.
+    case fitWhenLandscape
 }
 
 /// How much of a tile's video is still worth asking the SFU for.
@@ -64,10 +78,11 @@ enum ElementCallTileVisibility: Equatable {
 /// third person turning two rows into a grid, a rotation, all become the same tiles moving and
 /// resizing, which is what makes the screen feel native rather than a sequence of fades.
 ///
-/// Spec 003: a 4:3 grid that scrolls vertically, a 16:9 spotlight that stays put above it for a
-/// hero or, in a large call, the speaker, and small calls that share the stage equally. Only what
-/// is near the screen is composed at all, so a call of two hundred costs the phone what is on its
-/// screen rather than what is in the room.
+/// Spec 003: a 4:3 grid that scrolls vertically, and a 16:9 spotlight that stays put above it for a
+/// hero or, in a large call, the speaker. Only what is near the screen is composed at all, so a call
+/// of two hundred costs the phone what is on its screen rather than what is in the room. Calls of up
+/// to five with no remote share are spec 019's instead (`ElementCallSmallCallLayout`), producing
+/// this same value so a tile crossing between the two is a move rather than a remount.
 struct ElementCallStageLayout: Equatable {
     /// What the stage has to work with. Distances in points.
     struct Metrics: Equatable {
@@ -84,6 +99,10 @@ struct ElementCallStageLayout: Equatable {
         /// orientations: in landscape the bar floats over the spotlight, which runs under it,
         /// and only the grid's content end keeps clear of it.
         var controlsClearance: CGFloat
+        /// How far above the content's zero the screen's top edge is: the portrait top bar's room
+        /// and the top safe area. Only a picture that runs behind the top bar reaches up into it
+        /// (019 R4).
+        var topBleed: CGFloat = 0
         
         static let horizontalMargin: CGFloat = 16
         static let spacing: CGFloat = 12
@@ -166,6 +185,14 @@ struct ElementCallStageLayout: Equatable {
         /// Tiles that were live on the previous pass, for the edge hysteresis.
         var liveTileIDs: Set<MatrixRTCTileID> = []
         var metrics: Metrics
+        // What only the small-call layout reads (019). Last and defaulted, so a grid test states
+        // none of them.
+        /// `ElementCallSmallCallLayout.speaker(...)`'s choice, held through silence.
+        var speakerID: MatrixRTCTileID?
+        var ownCorner: ElementCallOwnTileCorner = .bottomRight
+        /// Our own picture's upright width over height, once one has been drawn.
+        var ownVideoAspect: CGFloat?
+        var floatingInsets = ElementCallSmallCallLayout.FloatingInsets.zero
     }
     
     /// What the layout asks the core for full records of: a rank range over the remote order for
@@ -183,6 +210,9 @@ struct ElementCallStageLayout: Equatable {
     /// grid because the grid scrolls underneath it. Named so the relationship is something a test
     /// can assert rather than something the next person has to notice.
     static let fullscreenZIndex: Double = 3
+    /// The scrim behind a tile going full screen: over everything it replaces, the spotlight's
+    /// controls included, and under the tile itself.
+    static let fullscreenScrimZIndex = 2.5
     static let spotlightZIndex: Double = 1
     
     var placements: [ElementCallTilePlacement]
@@ -203,6 +233,12 @@ struct ElementCallStageLayout: Equatable {
     /// nobody is looking at it. **Declared last** because the memberwise initialiser follows
     /// declaration order and the arrangements below call it with trailing labels.
     var hiddenTileIDs: Set<MatrixRTCTileID> = []
+    /// Nothing scrolls: the content is exactly one viewport, and the stage disables its scroller so
+    /// it does not even bounce, which would compete with dragging our own tile (019 R30).
+    var isStatic = false
+    /// The order a screen reader walks the tiles in, when it is not the order they are drawn in
+    /// (019 R27). Empty means the stage's own order.
+    var readingOrder: [MatrixRTCTileID] = []
     
     /// The furthest the content can scroll. What a shrinking grid settles to (R42).
     var maxScrollOffset: CGFloat {
@@ -218,7 +254,9 @@ struct ElementCallStageLayout: Equatable {
         // The ordinary arrangement is computed even when one tile fills the screen, for its
         // content height: a scroller whose content shrank to one screen would clamp the offset to
         // zero, and leaving fullscreen would land at the top instead of where you were (R63).
-        var layout = arrange(input, viewport: viewport)
+        var layout = ElementCallSmallCallLayout.applies(to: input.tiles)
+            ? ElementCallSmallCallLayout.arrange(input, viewport: viewport)
+            : arrange(input, viewport: viewport)
         // A tile that has gone is no longer in `tiles` — its member left, or their share stopped —
         // and the arrangement falls back on its own rather than showing an empty screen. The screen
         // clears the stale id when it notices.
@@ -265,7 +303,6 @@ struct ElementCallStageLayout: Equatable {
     // MARK: - The arrangement
     
     private static func arrange(_ input: Input, viewport: CGRect) -> ElementCallStageLayout {
-        let metrics = input.metrics
         let heroes = ElementCallSpotlight.heroes(in: input.tiles)
         let spotlit = input.tiles.firstIndex { $0.id == input.spotlightID && !$0.isLocal }.map { (rank: $0 - 1, tile: input.tiles[$0]) }
         let spotlight = spotlit?.tile
@@ -282,73 +319,12 @@ struct ElementCallStageLayout: Equatable {
         if let spotlight, heroes.count > 1, let shown = heroes.firstIndex(of: spotlight.id) {
             heroStack = HeroStack(count: heroes.count, shown: shown)
         }
-        var layout: ElementCallStageLayout
-        if spotlight == nil, grid.count <= 3 {
-            layout = small(grid.map(\.tile), viewport: viewport, metrics: metrics)
-        } else {
-            layout = ranked(grid, spotlight: spotlit, heroStack: heroStack, input: input, viewport: viewport)
-        }
+        // No small-call case here: a stage of five tiles or fewer without a spotlight never gets
+        // this far (019 supersedes 003 R34–R36).
+        var layout = ranked(grid, spotlight: spotlit, heroStack: heroStack, input: input, viewport: viewport)
         layout.hiddenTileIDs.formUnion(unshownHeroes)
         layout.heroStack = heroStack
         return layout
-    }
-    
-    /// One, two or three tiles and no spotlight share the stage equally (R34–R36); nothing scrolls.
-    ///
-    /// Two are stacked in portrait and side by side in landscape, in direct rooms too: the other
-    /// person full-bleed with ourselves as a corner thumbnail is retired (R35). Three are full-width
-    /// rows in portrait when three 4:3 rows fit above the controls, which on a phone they do not,
-    /// and the ordinary grid otherwise; in landscape a single row.
-    private static func small(_ tiles: [ElementCallTile], viewport: CGRect, metrics: Metrics) -> ElementCallStageLayout {
-        let cards = metrics.cardsFrame
-        var frames = [CGRect]()
-        switch (tiles.count, metrics.isLandscape) {
-        case (1, _):
-            // Alone, our tile takes the whole card area (002 R18, R19).
-            frames = [cards]
-        case (2, false):
-            let height = min(cards.width / Metrics.tileAspect, (cards.height - Metrics.spacing) / 2)
-            frames = rows(count: 2, width: cards.width, height: height, in: cards)
-        case (3, false):
-            let height = cards.width / Metrics.tileAspect
-            guard 3 * height + 2 * Metrics.spacing <= cards.height else {
-                return ranked(tiles.enumerated().map { (rank: $0.offset - 1, tile: $0.element) },
-                              spotlight: nil, heroStack: nil, input: .init(tiles: tiles, metrics: metrics), viewport: viewport)
-            }
-            frames = rows(count: 3, width: cards.width, height: height, in: cards)
-        case (let count, true):
-            // Side by side and centred on the stage's height, as the design draws two and three.
-            let width = (cards.width - CGFloat(count - 1) * Metrics.spacing) / CGFloat(count)
-            let height = min(width / Metrics.tileAspect, cards.height)
-            let top = (cards.height - height) / 2
-            frames = (0..<count).map { CGRect(x: cards.minX + CGFloat($0) * (width + Metrics.spacing), y: top, width: width, height: height) }
-        default:
-            preconditionFailure("small arrangements are one to three tiles")
-        }
-        let placements = zip(tiles, frames).enumerated().map { index, pair in
-            ElementCallTilePlacement(tile: pair.0,
-                                     frame: pair.1,
-                                     appearance: .card,
-                                     isSpotlight: false,
-                                     visibility: .live,
-                                     orderIndex: pair.0.isLocal ? nil : index - 1,
-                                     zIndex: 0)
-        }
-        let remote = placements.compactMap(\.orderIndex)
-        return ElementCallStageLayout(placements: placements,
-                                      contentHeight: viewport.height,
-                                      viewport: viewport,
-                                      detailWindow: DetailWindow(ranks: remote.isEmpty ? 0..<0 : 0..<(remote.max()! + 1), also: []),
-                                      // Anchored on the first tile, ourselves alone included: the
-                                      // source view is mounted as the anchor tile's background, so no
-                                      // anchor meant no source view in any window, and AVKit refuses
-                                      // one whose scene is not foreground-active. Minimizing alone
-                                      // did nothing at all.
-                                      pictureInPictureTileID: tiles.first?.id)
-    }
-    
-    private static func rows(count: Int, width: CGFloat, height: CGFloat, in cards: CGRect) -> [CGRect] {
-        (0..<count).map { CGRect(x: cards.minX, y: CGFloat($0) * (height + Metrics.spacing), width: width, height: height) }
     }
     
     /// The spotlight slot, if there is a spotlight, and the grid: two columns in portrait, a
@@ -386,8 +362,7 @@ struct ElementCallStageLayout: Equatable {
             let gridTop = spotlightFrame.map { $0.height + (heroStack == nil ? 0 : Metrics.heroDotsClearance) + Metrics.spacing } ?? 0
             gridFrame = CGRect(x: metrics.cardsLeading, y: gridTop, width: metrics.cardsWidth, height: 0)
             columns = Metrics.columns
-            // Half the grid width less the gap, from four tiles on, however much that leaves below
-            // the last row (R30); and the three-tiles fall-through lands here at the same size.
+            // Half the grid width less the gap, however much that leaves below the last row (R30).
             cellWidth = (metrics.cardsWidth - CGFloat(columns - 1) * Metrics.spacing) / CGFloat(columns)
             cellHeight = cellWidth / Metrics.tileAspect
         } else if spotlight != nil {

@@ -85,12 +85,14 @@ enum DeferredFulfillmentError: Error {
 /// - Parameters:
 ///   - asyncSequence: what to watch. Consumption starts here rather than in `fulfill()`.
 ///   - timeout: how long `fulfill()` waits before recording an issue. Only a bound on a broken
-///     expectation -- a passing test returns the moment the value arrives and never pays it. A
-///     minute, where the host uses ten seconds, because everything waited on here needs the main
-///     actor and `PreviewTests` renders 87 snapshots on that same actor: 35 seconds of it on CI.
+///     expectation -- a passing test returns the moment the value arrives and never pays it. Five
+///     minutes, where the host uses ten seconds, because everything waited on here needs the main
+///     actor and `PreviewTests` renders every snapshot on that same actor, for as long as that
+///     takes on CI. A minute was enough at 35 seconds of it and failed at 59: size it to the suite
+///     growing, not to today's run.
 ///   - condition: which emission is the one being waited for.
 func deferFulfillment<Value: Sendable>(_ asyncSequence: any AsyncSequence<Value, Never>,
-                                       timeout: Duration = .seconds(60),
+                                       timeout: Duration = .seconds(300),
                                        sourceLocation: SourceLocation = #_sourceLocation,
                                        until condition: @escaping (Value) -> Bool) -> DeferredFulfillment<Value> {
     let (stream, continuation) = AsyncStream<Value>.makeStream()

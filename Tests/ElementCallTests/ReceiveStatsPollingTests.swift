@@ -27,7 +27,7 @@ struct ReceiveStatsPollingTests {
     @Test
     func aSharersTwoTilesAskForTheCameraTheScreenAndOneMicrophone() {
         let roster = MatrixRTCTileRoster([tile("frank", kind: .screenShare), tile("frank")])
-        let streams = MatrixRTCCall.streamsToPoll(tiles: roster, released: [], localMemberID: me)
+        let streams = MatrixRTCMediaSession.streamsToPoll(tiles: roster, released: [], localMemberID: me)
         #expect(streams == [MatrixRTCStreamRef(memberID: "frank", kind: .screenShare),
                             MatrixRTCStreamRef(memberID: "frank", kind: .camera),
                             MatrixRTCStreamRef(memberID: "frank", kind: .microphone)])
@@ -38,7 +38,7 @@ struct ReceiveStatsPollingTests {
     @Test
     func aReleasedTileIsNotPolled() {
         let roster = MatrixRTCTileRoster([tile("bob"), tile("carol")])
-        let streams = MatrixRTCCall.streamsToPoll(tiles: roster, released: [tile("carol").id], localMemberID: me)
+        let streams = MatrixRTCMediaSession.streamsToPoll(tiles: roster, released: [tile("carol").id], localMemberID: me)
         #expect(streams == [MatrixRTCStreamRef(memberID: "bob", kind: .camera),
                             MatrixRTCStreamRef(memberID: "bob", kind: .microphone)])
     }
@@ -47,6 +47,6 @@ struct ReceiveStatsPollingTests {
     @Test
     func ourOwnTilesAreNeverPolled() {
         let roster = MatrixRTCTileRoster([tile(me)])
-        #expect(MatrixRTCCall.streamsToPoll(tiles: roster, released: [], localMemberID: me).isEmpty)
+        #expect(MatrixRTCMediaSession.streamsToPoll(tiles: roster, released: [], localMemberID: me).isEmpty)
     }
 }

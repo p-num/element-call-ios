@@ -69,4 +69,43 @@ public nonisolated enum CallAudioSessionConfigurator {
     public static var currentOutputName: String? {
         AVAudioSession.sharedInstance().currentRoute.outputs.first?.portName
     }
+    
+    /// What the user can pick, and which of it is in use. See ``CallAudioRoute`` for the rules.
+    public static func audioOutputs(hasReceiver: Bool) -> (outputs: [CallAudioOutput], current: CallAudioOutput?) {
+        let session = AVAudioSession.sharedInstance()
+        let inputs = (session.availableInputs ?? []).map(CallAudioPort.init)
+        let route = session.currentRoute.outputs.map(CallAudioPort.init)
+        let outputs = CallAudioRoute.outputs(availableInputs: inputs, routeOutputs: route, hasReceiver: hasReceiver)
+        return (outputs, CallAudioRoute.current(routeOutputs: route, in: outputs))
+    }
+    
+    /// Sends the call to `output`. Everything but the speaker clears the override and prefers that
+    /// device's microphone, which is what moves the audio there; a device with no microphone of its
+    /// own (wired headphones, possibly CarPlay) clears the preference so the system routes to it.
+    public static func selectAudioOutput(_ output: CallAudioOutput) throws {
+        let session = AVAudioSession.sharedInstance()
+        if output.kind == .speaker {
+            try session.overrideOutputAudioPort(.speaker)
+            return
+        }
+        try session.overrideOutputAudioPort(.none)
+        let inputs = session.availableInputs ?? []
+        let input = switch output.kind {
+        case .receiver:
+            inputs.first { $0.portType == .builtInMic }
+        default:
+            inputs.first { CallAudioPort($0).externalOutput.map { CallAudioRoute.isSameDevice($0, output) } ?? false }
+        }
+        try session.setPreferredInput(input)
+    }
+    
+    /// The route and the inputs as the session reports them, for the log line on each route change:
+    /// what CarPlay calls its ports is only learnt in a car.
+    public static var routeDescription: String {
+        let session = AVAudioSession.sharedInstance()
+        let describe: (AVAudioSessionPortDescription) -> String = { "\($0.portType.rawValue)(\($0.portName))" }
+        let outputs = session.currentRoute.outputs.map(describe).joined(separator: ", ")
+        let inputs = (session.availableInputs ?? []).map(describe).joined(separator: ", ")
+        return "outputs: [\(outputs)], available inputs: [\(inputs)]"
+    }
 }

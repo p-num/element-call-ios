@@ -27,7 +27,7 @@ enum ElementCallStageDump {
     static func render(frame: MatrixRTCScenario.Frame,
                        layout: ElementCallStageLayout,
                        tiles: [ElementCallTile],
-                       call: MatrixRTCCall) -> String {
+                       call: MatrixRTCMediaSession) -> String {
         var lines = ["== \(describe(frame.time)) \(frame.text)"]
         let window = layout.detailWindow
         let subscribed = call.tiles.order.map(\.id).filter { id in
@@ -53,6 +53,15 @@ enum ElementCallStageDump {
                     slot = "full"
                 } else if placement.isSpotlight {
                     slot = "spot"
+                } else if placement.appearance == .floating {
+                    slot = "float \(corner(of: placement.frame, in: layout.viewport))"
+                } else if layout.isStatic, layout.viewport.width <= layout.viewport.height || placement.appearance == .fullBleed {
+                    // A small call's own places, by the order it reads them in (019 R7, R27).
+                    slot = "small \(layout.readingOrder.firstIndex(of: tile.id) ?? 0)"
+                } else if layout.isStatic {
+                    let row = rows.firstIndex(of: placement.frame.minY) ?? 0
+                    let column = columns.firstIndex(of: placement.frame.minX) ?? 0
+                    slot = "inline \(row),\(column)"
                 } else {
                     let row = rows.firstIndex(of: placement.frame.minY) ?? 0
                     let column = columns.firstIndex(of: placement.frame.minX) ?? 0
@@ -126,6 +135,12 @@ enum ElementCallStageDump {
     private static func describe(_ time: Duration) -> String {
         let seconds = Double(time.components.seconds) + Double(time.components.attoseconds) / 1e18
         return seconds == seconds.rounded() ? "\(Int(seconds))s" : "\(seconds)s"
+    }
+    
+    /// Our floating tile's corner, by which quadrant of the screen it is in: `tl`, `tr`, `bl`, `br`,
+    /// short enough for the slot column.
+    private static func corner(of frame: CGRect, in viewport: CGRect) -> String {
+        (frame.midY < viewport.midY ? "t" : "b") + (frame.midX < viewport.midX ? "l" : "r")
     }
     
     private static func pad(_ text: String, _ width: Int) -> String {
