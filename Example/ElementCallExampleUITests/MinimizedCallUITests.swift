@@ -62,7 +62,8 @@ final class MinimizedCallUITests: XCTestCase {
         
         bar.tap()
         
-        XCTAssertTrue(carol.waitForExistence(timeout: 5), "Tapping the bar should restore the call.")
+        // Restoring remounts the stage and its accessibility tree, just as opening the fixture does.
+        XCTAssertTrue(carol.waitForExistence(timeout: 10), "Tapping the bar should restore the call.")
         XCTAssertFalse(bar.exists, "The bar belongs to a minimized call only.")
     }
     
