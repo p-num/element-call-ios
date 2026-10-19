@@ -21,6 +21,12 @@ public nonisolated enum ElementCallConnection: Equatable, Sendable {
     case failed(String)
 }
 
+/// A receipt for the most recent local departure attempt, not closure of the shared call.
+public nonisolated struct ElementCallDeparture: Sendable {
+    public let roomID: String
+    public let result: MatrixRTCLeaveResult
+}
+
 /// What the host has to do about a change in the call, beyond drawing it.
 public nonisolated enum ElementCallControllerAction: Sendable {
     /// The user asked to shrink the call. The host decides where it goes.
@@ -64,6 +70,8 @@ public final class ElementCallController {
     
     /// Our membership in the room's call, from the join until the call ends.
     public private(set) var rtcCall: MatrixRTCCall?
+    /// Retained through reset for host delivery; cleared when a new call starts.
+    public private(set) var lastDeparture: ElementCallDeparture?
     public private(set) var call: MatrixRTCMediaSession?
     
     /// The user's media intent while there is no call to hold it. The control bar is on screen from
@@ -209,6 +217,7 @@ public final class ElementCallController {
             log(.warning, "already in a call, ignoring start for \(room.roomID)")
             return
         }
+        lastDeparture = nil
         self.callData = callData
         self.room = room
         connection = .joining
@@ -669,7 +678,8 @@ public final class ElementCallController {
         
         if let rtcCall {
             if leave {
-                await rtcCall.leave()
+                let result = await rtcCall.leave()
+                lastDeparture = .init(roomID: roomID, result: result)
             } else {
                 await rtcCall.mediaSession?.disconnect()
             }

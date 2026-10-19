@@ -25,9 +25,36 @@ final class FakeRtcCall: RtcCallProtocol, Sendable {
     private struct State {
         var requests: [HandRequest] = []
         var pending: CheckedContinuation<Void, Error>?
+        var leaveCount = 0
+        var pendingLeave: CheckedContinuation<Void, Error>?
     }
     
     private let state = Mutex(State())
+    private let holdsLeave: Bool
+    
+    init(holdsLeave: Bool = false) {
+        self.holdsLeave = holdsLeave
+    }
+    
+    var leaveCount: Int {
+        state.withLock { $0.leaveCount }
+    }
+    
+    var hasPendingLeave: Bool {
+        state.withLock { $0.pendingLeave != nil }
+    }
+    
+    func answerLeave(failingWith error: Error? = nil) {
+        let pending = state.withLock { state in
+            defer { state.pendingLeave = nil }
+            return state.pendingLeave
+        }
+        if let error {
+            pending?.resume(throwing: error)
+        } else {
+            pending?.resume()
+        }
+    }
     
     /// Every hand request made, answered or not.
     var requests: [HandRequest] {
@@ -86,7 +113,14 @@ final class FakeRtcCall: RtcCallProtocol, Sendable {
         true
     }
     
-    func leave(params: FfiLeaveSessionParams) async throws { }
+    func leave(params: FfiLeaveSessionParams) async throws {
+        state.withLock { $0.leaveCount += 1 }
+        if holdsLeave {
+            try await withCheckedThrowingContinuation { continuation in
+                state.withLock { $0.pendingLeave = continuation }
+            }
+        }
+    }
     
     func memberCount() async -> UInt64 {
         1

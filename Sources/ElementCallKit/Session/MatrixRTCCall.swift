@@ -9,6 +9,12 @@ import Foundation
 import MatrixRtc
 import Observation
 
+/// The outcome of sending this device's departure, separately from local media teardown.
+public nonisolated enum MatrixRTCLeaveResult: Sendable, Equatable {
+    case confirmed
+    case failed
+}
+
 /// Our participation in a room's call: membership in, media attached separately.
 ///
 /// You are in the call as soon as ``MatrixRTCRoom/joinCall(notify:)`` returned; media is attached with
@@ -32,7 +38,7 @@ public final class MatrixRTCCall {
     /// The protocol rather than the class so a test can stand in for the membership; only
     /// ``connectMedia()`` needs the core's own call, and says so.
     @ObservationIgnored private let rtcCall: any RtcCallProtocol
-    @ObservationIgnored private var hasLeft = false
+    @ObservationIgnored private var leaveTask: Task<MatrixRTCLeaveResult, Never>?
     @ObservationIgnored private var membershipReader: Task<Void, Never>?
     
     init(rtcCall: any RtcCallProtocol) {
@@ -84,24 +90,28 @@ public final class MatrixRTCCall {
         return mediaSession
     }
     
-    /// Idempotent: hanging up and tearing the screen down both leave, and the core refuses a second
-    /// attempt.
-    public func leave(reason: MatrixRTCLeaveReason? = nil) async {
-        guard !hasLeft else {
-            MatrixRTCLog.debug("Already left \(roomID)/\(slotID)")
-            return
+    /// Concurrent and repeated callers share the original result. A failed send cannot be
+    /// retried on the ended core object and is never converted to success by a later teardown.
+    @discardableResult
+    public func leave(reason: MatrixRTCLeaveReason? = nil) async -> MatrixRTCLeaveResult {
+        if let leaveTask {
+            return await leaveTask.value
         }
-        hasLeft = true
-        
-        await mediaSession?.disconnect()
-        mediaSession = nil
-        do {
-            let leaveReason = reason.map { FfiLeaveReason(code: $0.code, reason: $0.reason) }
-            try await rtcCall.leave(params: FfiLeaveSessionParams(leaveReason: leaveReason))
-            MatrixRTCLog.info("Left \(roomID)/\(slotID)")
-        } catch {
-            MatrixRTCLog.warning("Failed to leave \(roomID)/\(slotID): \(error)")
+        let task = Task { [self] in
+            await mediaSession?.disconnect()
+            mediaSession = nil
+            do {
+                let leaveReason = reason.map { FfiLeaveReason(code: $0.code, reason: $0.reason) }
+                try await rtcCall.leave(params: FfiLeaveSessionParams(leaveReason: leaveReason))
+                MatrixRTCLog.info("Left \(roomID)/\(slotID)")
+                return MatrixRTCLeaveResult.confirmed
+            } catch {
+                MatrixRTCLog.warning("Failed to leave \(roomID)/\(slotID): \(error)")
+                return MatrixRTCLeaveResult.failed
+            }
         }
+        leaveTask = task
+        return await task.value
     }
     
     // MARK: - Raised hand
