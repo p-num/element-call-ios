@@ -22,9 +22,14 @@ public nonisolated enum ElementCallConnection: Equatable, Sendable {
 }
 
 /// A receipt for the most recent local departure attempt, not closure of the shared call.
-public nonisolated struct ElementCallDeparture: Sendable {
+public nonisolated struct ElementCallDeparture: Equatable, Sendable {
     public let roomID: String
     public let result: MatrixRTCLeaveResult
+    
+    public init(roomID: String, result: MatrixRTCLeaveResult) {
+        self.roomID = roomID
+        self.result = result
+    }
 }
 
 /// What the host has to do about a change in the call, beyond drawing it.

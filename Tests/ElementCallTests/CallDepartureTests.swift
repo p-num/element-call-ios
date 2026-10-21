@@ -61,10 +61,10 @@ struct CallDepartureTests {
             await Task.yield()
         }
         #expect(ended)
-        #expect(controller.lastDeparture?.roomID == "!room:example.org")
-        #expect(controller.lastDeparture?.result == (succeeds ? .confirmed : .failed))
+        let departure = ElementCallDeparture(roomID: "!room:example.org", result: succeeds ? .confirmed : .failed)
+        #expect(controller.lastDeparture == departure)
         controller.reset()
-        #expect(controller.lastDeparture?.result == (succeeds ? .confirmed : .failed))
+        #expect(controller.lastDeparture == departure)
         observer.cancel()
     }
     
