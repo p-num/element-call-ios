@@ -24,7 +24,7 @@ nonisolated struct ScenarioParserTests {
     @Test
     func everyVendoredScenarioParses() throws {
         let corpus = try Self.corpus()
-        #expect(corpus.count == 6)
+        #expect(corpus.count == 7)
         for url in corpus {
             let scenario = try Self.load(url)
             #expect(!scenario.frames.isEmpty, "\(scenario.name) has no frames")

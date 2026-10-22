@@ -44,6 +44,76 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     @MainActor var bodySM: Font { get }
     @MainActor var bodySMSemibold: Font { get }
     @MainActor var bodyLGSemibold: Font { get }
+    
+    /// The ring round a grid tile whose member is speaking, as layers drawn bottom first. Asked for
+    /// with the tile's own size because the design's diagonal is a CSS angle, and where that puts
+    /// the colours depends on the tile's proportions: computed once for the screen, a narrow tile
+    /// would show only the middle of the sweep. Return a single colour for a plain ring.
+    @MainActor func activeSpeakerBorder(in size: CGSize) -> [AnyShapeStyle]
+    
+    /// The ring round a tile whose member has a hand up, the same way.
+    @MainActor func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle]
+}
+
+public extension ElementCallThemeProtocol {
+    /// The design's gradients, so a host theme written before these existed keeps compiling and
+    /// gets the designed rings rather than none.
+    @MainActor func activeSpeakerBorder(in size: CGSize) -> [AnyShapeStyle] {
+        ElementCallBorderGradient.activeSpeaker.layers(in: size)
+    }
+    
+    @MainActor func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle] {
+        ElementCallBorderGradient.raisedHand.layers(in: size)
+    }
+}
+
+/// The design's tile rings: a vertical gradient over a diagonal one between the same two colours,
+/// as the Figma's CSS layers them, the diagonal at 0.7 and the vertical at 0.9. Literal colours
+/// because Compound has no token for any of them; Android's `ActiveSpeakerBrush` uses the same
+/// speaking pair.
+public nonisolated struct ElementCallBorderGradient: Sendable {
+    /// Blue to teal.
+    public static let activeSpeaker = ElementCallBorderGradient(top: Color(red: 13 / 255, green: 92 / 255, blue: 189 / 255),
+                                                                bottom: Color(red: 13 / 255, green: 189 / 255, blue: 168 / 255))
+    /// Orange to yellow.
+    public static let raisedHand = ElementCallBorderGradient(top: Color(red: 220 / 255, green: 103 / 255, blue: 0),
+                                                             bottom: Color(red: 241 / 255, green: 189 / 255, blue: 0))
+    
+    private static let diagonalCSSDegrees = 119.36
+    
+    public let top: Color
+    public let bottom: Color
+    
+    public init(top: Color, bottom: Color) {
+        self.top = top
+        self.bottom = bottom
+    }
+    
+    public func layers(in size: CGSize) -> [AnyShapeStyle] {
+        let diagonal = Self.diagonalEnds(in: size)
+        return [
+            AnyShapeStyle(LinearGradient(colors: [top.opacity(0.7), bottom.opacity(0.7)],
+                                         startPoint: diagonal.start,
+                                         endPoint: diagonal.end)),
+            AnyShapeStyle(LinearGradient(colors: [top.opacity(0.9), bottom.opacity(0.9)],
+                                         startPoint: .top,
+                                         endPoint: .bottom))
+        ]
+    }
+    
+    /// Where CSS puts a gradient line: through the centre, at the angle measured clockwise from up,
+    /// and |w·sin θ| + |h·cos θ| long, which is exactly long enough for the end colours to land in
+    /// the corners. In unit points, since that is what a gradient filling a shape is laid out in.
+    static func diagonalEnds(in size: CGSize) -> (start: UnitPoint, end: UnitPoint) {
+        guard size.width > 0, size.height > 0 else { return (.topLeading, .bottomTrailing) }
+        let angle = diagonalCSSDegrees * .pi / 180
+        let dx = sin(angle)
+        let dy = -cos(angle)
+        let half = (abs(size.width * dx) + abs(size.height * dy)) / 2
+        let offsetX = dx * half / size.width
+        let offsetY = dy * half / size.height
+        return (UnitPoint(x: 0.5 - offsetX, y: 0.5 - offsetY), UnitPoint(x: 0.5 + offsetX, y: 0.5 + offsetY))
+    }
 }
 
 // MARK: - Icons
@@ -58,6 +128,8 @@ public nonisolated enum ElementCallIcon: Sendable, CaseIterable {
     case shareScreen
     case volumeOn
     case volumeOff
+    case headphones
+    case bluetooth
     case raisedHand
     case userProfile
     case overflow

@@ -16,10 +16,32 @@ struct ElementCallExampleCatalogue: View {
     let target: ElementCallExampleLaunchTarget
     /// Something the host wants read, such as a scenario that did not parse.
     var notice: String?
+    /// The row to come back to. The catalogue is unmounted while a call is up, so it would
+    /// otherwise reappear at the top, a long scroll away from the fixture just closed.
+    var returningTo: String?
     let onPick: (ElementCallExampleFixture) -> Void
     let onPickScenario: (ElementCallExampleScenario) -> Void
     
+    /// Each row's identifier, which is also its scroll identity.
+    static func rowID(_ fixture: ElementCallExampleFixture) -> String {
+        "example.fixture.\(fixture.rawValue)"
+    }
+    
+    static func rowID(_ scenario: ElementCallExampleScenario) -> String {
+        "example.scenario.\(scenario.name)"
+    }
+    
     var body: some View {
+        ScrollViewReader { proxy in
+            list
+                .onAppear {
+                    guard let returningTo else { return }
+                    proxy.scrollTo(returningTo, anchor: .center)
+                }
+        }
+    }
+    
+    private var list: some View {
         List {
             if case .unknown(let flag, let name) = target {
                 unknownTarget(flag: flag, name: name)
@@ -50,7 +72,8 @@ struct ElementCallExampleCatalogue: View {
                         .accessibilityElement(children: .combine)
                     }
                     .buttonStyle(.plain)
-                    .accessibilityIdentifier("example.scenario.\(scenario.name)")
+                    .accessibilityIdentifier(Self.rowID(scenario))
+                    .id(Self.rowID(scenario))
                 }
             }
         }
@@ -73,7 +96,8 @@ struct ElementCallExampleCatalogue: View {
             .accessibilityElement(children: .combine)
         }
         .buttonStyle(.plain)
-        .accessibilityIdentifier("example.fixture.\(fixture.rawValue)")
+        .accessibilityIdentifier(Self.rowID(fixture))
+        .id(Self.rowID(fixture))
     }
     
     /// Shown rather than silently substituted. The launch flag used to fall back to `.group` on

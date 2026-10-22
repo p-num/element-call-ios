@@ -46,6 +46,24 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
         var detailOnly: Set<MatrixRTCTileID>?
         var detailWindows: [DetailWindowRecord] = []
         var constraints: [ConstraintsRecord] = []
+        /// What the last `me` frame said, kept to renumber our hand as remote hands come and go.
+        var me = (hasVideo: false, isMicrophoneMuted: false, hasHandRaised: false)
+        var remoteHands = 0
+        
+        /// Our tile again, delivered as the core would: to a waiting reader, or kept for the next.
+        mutating func publishLocalState(memberID: String) -> CheckedContinuation<FfiLocalState?, Never>? {
+            // A scenario has no raise times, and ours is raised last: after every remote hand.
+            localState = MatrixRTCScriptedSession.localState(memberID: memberID,
+                                                             hasVideo: me.hasVideo,
+                                                             isMicrophoneMuted: me.isMicrophoneMuted,
+                                                             handPosition: me.hasHandRaised ? remoteHands + 1 : nil)
+            guard let pending = pendingLocalState else {
+                hasUnreadLocalState = true
+                return nil
+            }
+            pendingLocalState = nil
+            return pending
+        }
     }
     
     public let localMemberID: String
@@ -61,30 +79,36 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
     // MARK: - Driving
     
     /// The next roster the call sees, built from the tokens as the core would publish them.
+    ///
+    /// A scenario has no raise times, so the queue is the order the roster lists the hands, counted
+    /// over the whole roster as the core counts it, whatever the window carries (009 R6). Android's
+    /// harness numbers the same way, so the two platforms' dumps agree.
     public func push(roster tokens: [MatrixRTCScenario.Token]) {
-        let pending = state.withLock { state -> CheckedContinuation<FfiTileRoster?, Never>? in
+        let hands = tokens.filter { $0.hasHandRaised && $0.kind == .person }
+        let positions = Dictionary(uniqueKeysWithValues: hands.enumerated().map { ($1.tileID, $0 + 1) })
+        let (pendingRoster, pendingLocalState) = state.withLock { state -> (CheckedContinuation<FfiTileRoster?, Never>?, CheckedContinuation<FfiLocalState?, Never>?) in
             let only = state.detailOnly
             state.roster = FfiTileRoster(order: tokens.map(Self.reference),
-                                         detail: tokens.filter { only?.contains($0.tileID) ?? true }.map(Self.detail))
+                                         detail: tokens.filter { only?.contains($0.tileID) ?? true }.map { Self.detail($0, handPosition: positions[$0.tileID]) })
+            let renumbersOurs = state.me.hasHandRaised && state.remoteHands != hands.count
+            state.remoteHands = hands.count
+            let pendingLocalState = renumbersOurs ? state.publishLocalState(memberID: localMemberID) : nil
             guard let pending = state.pendingRoster else {
                 state.hasUnreadRoster = true
-                return nil
+                return (nil, pendingLocalState)
             }
             state.pendingRoster = nil
-            return pending
+            return (pending, pendingLocalState)
         }
-        pending?.resume(returning: state.withLock { $0.roster })
+        let (roster, localState) = state.withLock { ($0.roster, $0.localState) }
+        pendingRoster?.resume(returning: roster)
+        pendingLocalState?.resume(returning: localState)
     }
     
-    public func push(me hasVideo: Bool, isMicrophoneMuted: Bool) {
+    public func push(me hasVideo: Bool, isMicrophoneMuted: Bool, hasHandRaised: Bool = false) {
         let pending = state.withLock { state -> CheckedContinuation<FfiLocalState?, Never>? in
-            state.localState = Self.localState(memberID: localMemberID, hasVideo: hasVideo, isMicrophoneMuted: isMicrophoneMuted)
-            guard let pending = state.pendingLocalState else {
-                state.hasUnreadLocalState = true
-                return nil
-            }
-            state.pendingLocalState = nil
-            return pending
+            state.me = (hasVideo, isMicrophoneMuted, hasHandRaised)
+            return state.publishLocalState(memberID: localMemberID)
         }
         pending?.resume(returning: state.withLock { $0.localState })
     }
@@ -176,6 +200,9 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
         state.withLock { $0.localState }
     }
     
+    /// A scenario states the order itself, so there is nothing to rank.
+    public func setRankingThreshold(tiles: UInt32) { }
+    
     public func setDetailWindow(offset: UInt32, len: UInt32, also: [FfiTileId]) {
         let record = DetailWindowRecord(time: clock.elapsed, offset: Int(offset), length: Int(len), also: also.map(MatrixRTCTileID.init))
         state.withLock { $0.detailWindows.append(record) }
@@ -247,7 +274,7 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
         FfiTileRef(id: FfiTileId(memberId: token.memberID, kind: token.kind.ffi), userId: token.userID, hero: token.isHero)
     }
     
-    private static func detail(_ token: MatrixRTCScenario.Token) -> FfiCallTile {
+    private static func detail(_ token: MatrixRTCScenario.Token, handPosition: Int?) -> FfiCallTile {
         FfiCallTile(memberId: token.memberID,
                     kind: token.kind.ffi,
                     userId: token.userID,
@@ -256,11 +283,12 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
                     hasVideo: token.hasVideo,
                     microphoneMuted: token.isMicrophoneMuted,
                     speaking: token.isSpeaking,
-                    handRaisedAtMs: token.hasHandRaised ? 1 : nil,
+                    handRaisedAtMs: handPosition.map { UInt64($0) },
+                    handRaisedPosition: handPosition.map { UInt32($0) },
                     reachable: true)
     }
     
-    private static func localState(memberID: String, hasVideo: Bool, isMicrophoneMuted: Bool) -> FfiLocalState {
+    fileprivate static func localState(memberID: String, hasVideo: Bool, isMicrophoneMuted: Bool, handPosition: Int? = nil) -> FfiLocalState {
         FfiLocalState(tile: FfiCallTile(memberId: memberID,
                                         kind: .person,
                                         userId: "@me:example.com",
@@ -269,7 +297,8 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
                                         hasVideo: hasVideo,
                                         microphoneMuted: isMicrophoneMuted,
                                         speaking: false,
-                                        handRaisedAtMs: nil,
+                                        handRaisedAtMs: handPosition.map { UInt64($0) },
+                                        handRaisedPosition: handPosition.map { UInt32($0) },
                                         reachable: true),
                       isScreenSharing: false)
     }
@@ -278,14 +307,14 @@ public final nonisolated class MatrixRTCScriptedSession: MediaSessionProtocol, S
 /// Walks a call through a scenario: advances the clock to each frame, feeds rosters to the session
 /// and waits for the call to have taken them, and hands actions back to whoever drives the stage.
 ///
-/// The player owns the call rather than the other way round because `MatrixRTCCall.init` is
+/// The player owns the call rather than the other way round because `MatrixRTCMediaSession.init` is
 /// internal: this is the one public way to make a call that has no session behind it, and it is
 /// public because the example harness runs on it, the same reason `ElementCallFakes` ship.
 public final class MatrixRTCScenarioPlayer {
     public let scenario: MatrixRTCScenario
     public let clock: MatrixRTCManualClock
     public let session: MatrixRTCScriptedSession
-    public let call: MatrixRTCCall
+    public let call: MatrixRTCMediaSession
     /// The index of the next frame `step()` applies.
     public private(set) var position = 0
     
@@ -297,7 +326,7 @@ public final class MatrixRTCScenarioPlayer {
         self.scenario = scenario
         clock = MatrixRTCManualClock()
         session = MatrixRTCScriptedSession(localMemberID: localMemberID, clock: clock)
-        call = MatrixRTCCall(localMemberID: localMemberID, mediaSession: session, clock: clock, capturesCamera: false)
+        call = MatrixRTCMediaSession(localMemberID: localMemberID, mediaSession: session, clock: clock, capturesCamera: false)
     }
     
     /// Starts the call's pumps. Nothing has been applied yet; the first `step()` applies frame 0.
@@ -322,8 +351,8 @@ public final class MatrixRTCScenarioPlayer {
                 call.tiles.order.map(\.id) == tokens.map(\.tileID)
                     && Set(call.tiles.detail.keys) == Set(tokens.map(\.tileID)).intersection(self.detailOnly ?? Set(tokens.map(\.tileID)))
             }
-        case .me(let hasVideo, let isMicrophoneMuted):
-            session.push(me: hasVideo, isMicrophoneMuted: isMicrophoneMuted)
+        case .me(let hasVideo, let isMicrophoneMuted, let hasHandRaised):
+            session.push(me: hasVideo, isMicrophoneMuted: isMicrophoneMuted, hasHandRaised: hasHandRaised)
             await waitUntil { [call] in
                 call.ownTile?.hasVideo == hasVideo && call.ownTile?.isMicrophoneMuted == isMicrophoneMuted
             }

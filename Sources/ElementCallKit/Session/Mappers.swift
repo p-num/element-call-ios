@@ -30,21 +30,12 @@ nonisolated extension MatrixRTCStreamKind {
     }
 }
 
-nonisolated extension MatrixRTCElementCallCompat {
-    var ffi: FfiElementCallCompat {
+nonisolated extension MatrixRTCMembershipFormat {
+    var ffi: FfiMembershipFormat {
         switch self {
-        case .off: .off
-        case .stickyEvents: .stickyEvents
-        case .stateEvents: .stateEvents
-        }
-    }
-}
-
-nonisolated extension MatrixRTCTransport {
-    var ffi: FfiTransportConfig? {
-        switch self {
-        case .liveKit(let serviceURL): FfiTransportConfig(type: "livekit", livekitServiceUrl: serviceURL.absoluteString)
-        case .unsupported: nil
+        case .current: .current
+        case .sticky2025: .sticky2025
+        case .roomState: .roomState
         }
     }
 }
@@ -116,6 +107,7 @@ nonisolated extension MatrixRTCTile {
                   isMicrophoneMuted: tile.microphoneMuted,
                   isSpeaking: tile.speaking,
                   handRaisedAt: tile.handRaisedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                  handRaisedPosition: tile.handRaisedPosition.map(Int.init),
                   isReachable: tile.reachable)
     }
 }
@@ -169,10 +161,10 @@ nonisolated extension MatrixRTCFrameEncryptionState {
 nonisolated extension MatrixRTCCallEvent {
     init(_ event: FfiCallEvent) {
         switch event {
-        case .participantJoined(let memberId, let userId):
-            self = .participantJoined(memberID: memberId, userID: userId)
-        case .participantLeft(let memberId):
-            self = .participantLeft(memberID: memberId)
+        case .participantJoined(let memberId, let userId, let participantCount):
+            self = .participantJoined(memberID: memberId, userID: userId, participantCount: Int(participantCount))
+        case .participantLeft(let memberId, let participantCount):
+            self = .participantLeft(memberID: memberId, participantCount: Int(participantCount))
         case .streamStarted(let memberId, let kind):
             self = .streamStarted(memberID: memberId, kind: .init(kind))
         case .streamStopped(let memberId, let kind):
@@ -203,6 +195,7 @@ nonisolated extension MatrixRTCCallEvent {
         case .ended(let reason):
             switch reason {
             case .left: self = .ended(.left)
+            case .slotClosed: self = .ended(.slotClosed)
             case .connectionClosed(let message): self = .ended(.connectionClosed(message: message))
             }
         }

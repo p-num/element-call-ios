@@ -61,7 +61,7 @@ struct ElementCallStageLayoutTests {
                         isMicrophoneMuted: false,
                         hasVideo: kind == .screenShare,
                         isSpeaking: false,
-                        hasHandRaised: false,
+                        handPosition: nil,
                         isHero: isHero,
                         stats: nil)
     }
@@ -98,76 +98,28 @@ struct ElementCallStageLayoutTests {
         layout.placements.filter { !$0.isSpotlight }.sorted { ($0.frame.minY, $0.frame.minX) < ($1.frame.minY, $1.frame.minX) }
     }
     
-    // MARK: - Small calls (R34–R36)
+    // MARK: - Which layout (019 R1, R8, R34)
     
+    /// Up to five tiles and no spotlight are spec 019's small-call layout, which does not scroll;
+    /// the sixth tile is the grid. 003's own small arrangements (R34–R36) are superseded.
     @Test
-    func aloneOurTileTakesTheWholeCardArea() throws {
-        let portrait = try placement(local, in: compute([local]))
-        #expect(portrait.frame == CGRect(x: margin, y: 0, width: width - 2 * margin, height: cardsBottom))
-        #expect(portrait.appearance == .card)
-        #expect(!portrait.isSpotlight)
-        let sideways = try placement(local, in: compute([local], metrics: landscape))
-        #expect(sideways.frame == landscapeCards)
-        #expect(compute([local]).contentHeight == height, "nothing to scroll")
+    func fiveTilesAreTheSmallCallLayoutAndSixAreTheGrid() {
+        #expect(compute([local] + Self.members(4)).isStatic)
+        let six = compute([local] + Self.members(5))
+        #expect(!six.isStatic)
+        #expect(six.placements.allSatisfy { $0.appearance == .card })
     }
     
-    /// Two people share the stage equally, in direct rooms too: the other person full-bleed with
-    /// ourselves as a corner thumbnail is retired (R35).
+    /// Full screen is the same one tile over either layout (019 R34).
     @Test
-    func twoTilesAreStackedInPortraitAndSideBySideInLandscape() throws {
-        let stacked = compute([local, bob])
-        let ours = try placement(local, in: stacked)
-        let theirs = try placement(bob, in: stacked)
-        let rowHeight = (width - 2 * margin) * 3 / 4
-        #expect(ours.frame == CGRect(x: margin, y: 0, width: width - 2 * margin, height: rowHeight))
-        #expect(theirs.frame == CGRect(x: margin, y: rowHeight + spacing, width: width - 2 * margin, height: rowHeight))
-        #expect(theirs.frame.maxY <= cardsBottom)
-        #expect(ours.appearance == .card && theirs.appearance == .card)
-        
-        let beside = compute([local, bob], metrics: landscape)
-        let left = try placement(local, in: beside)
-        let right = try placement(bob, in: beside)
-        // Centred on the stage's height, as the design draws two side by side.
-        #expect(left.frame.minY == (landscapeCards.height - left.frame.height) / 2)
-        #expect(left.frame.minY == right.frame.minY)
-        #expect(left.frame.size == right.frame.size)
-        #expect(left.frame.width == (landscapeCards.width - spacing) / 2)
-        #expect(right.frame.maxX == landscapeCards.maxX)
-        #expect(abs(left.frame.width / left.frame.height - 4 / 3) < 0.001)
+    func fullScreenOverTheSmallCallLayoutIsOneTile() throws {
+        let layout = compute([local, bob, carol], fullscreen: bob.id)
+        #expect(layout.placements.map(\.id) == [bob.id])
+        #expect(try placement(bob, in: layout).appearance == .fullscreen)
+        #expect(layout.hiddenTileIDs == [local.id, carol.id])
     }
     
-    /// A short stage squeezes two rows rather than pushing the second under the controls.
-    @Test
-    func twoRowsThatDoNotFitAreSqueezedToFit() throws {
-        let short = ElementCallStageLayout.Metrics(area: CGSize(width: 393, height: 500), bottomInset: 34, controlsClearance: 84)
-        let layout = compute([local, bob], metrics: short)
-        #expect(try placement(bob, in: layout).frame.maxY == short.cardsBottom)
-        #expect(try placement(local, in: layout).frame.height == (short.cardsBottom - spacing) / 2)
-    }
-    
-    /// Three 4:3 rows do not fit above the controls on a phone, so three people get the grid with
-    /// the third tile left-aligned in row two (R36); a stage tall enough gets three rows.
-    @Test
-    func threeTilesAreRowsWhenTheyFitAndTheGridOtherwise() throws {
-        let phone = compute([local, bob, carol])
-        let third = try placement(carol, in: phone)
-        #expect(third.frame == CGRect(x: margin, y: cellHeight + spacing, width: cellWidth, height: cellHeight))
-        #expect(try placement(local, in: phone).frame.minY == 0)
-        
-        let tall = ElementCallStageLayout.Metrics(area: CGSize(width: 393, height: 1100), bottomInset: 34, controlsClearance: 84)
-        let rows = compute([local, bob, carol], metrics: tall)
-        let rowHeight = (width - 2 * margin) * 3 / 4
-        #expect(try placement(carol, in: rows).frame == CGRect(x: margin, y: 2 * (rowHeight + spacing), width: width - 2 * margin, height: rowHeight))
-        
-        let sideways = compute([local, bob, carol], metrics: landscape)
-        let row = grid(sideways)
-        #expect(Set(row.map(\.frame.minY)).count == 1)
-        #expect(row[0].frame.minY == (landscapeCards.height - row[0].frame.height) / 2, "centred on the height")
-        #expect(row.map(\.id) == [local.id, bob.id, carol.id])
-        #expect(row[2].frame.maxX == landscapeCards.maxX)
-    }
-    
-    /// With a spotlight the ordinary grid is used at any count (R34).
+    /// A remote share means the grid with the share in the spotlight, at any count (003 R34, 019 R8).
     @Test
     func aSpotlightMeansTheGridEvenForTwoTiles() throws {
         let share = Self.share("bob")
@@ -179,11 +131,12 @@ struct ElementCallStageLayoutTests {
     
     // MARK: - The portrait grid (R10, R12, R26, R29, R30)
     
+    /// Six tiles, the fewest the grid gets without a spotlight (019 R1).
     @Test
-    func fromFourTilesOnACellIsHalfTheWidthAndTheRowsStartAtTheTop() {
-        let layout = compute([local] + Self.members(4))
+    func aCellIsHalfTheWidthAndTheRowsStartAtTheTop() {
+        let layout = compute([local] + Self.members(5))
         let cells = grid(layout)
-        #expect(cells.count == 5)
+        #expect(cells.count == 6)
         #expect(Set(cells.map(\.frame.size)).count == 1, "every grid tile is the same size (R12)")
         #expect(cells[0].frame == CGRect(x: margin, y: 0, width: cellWidth, height: cellHeight))
         #expect(cells[1].frame.minX == margin + cellWidth + spacing)
@@ -523,6 +476,14 @@ struct ElementCallStageLayoutTests {
     /// z position while it does. So the one growing has to be above every z position any other
     /// arrangement hands out, or something fades away on top of it: which is exactly what the
     /// spotlight's 1 did to a grid tile's 0.
+    /// The scrim behind a growing tile covers the stage, the spotlight's arrows and dots
+    /// included, and stays under the tile.
+    @Test
+    func theFullScreenScrimIsBetweenTheStageAndTheTile() {
+        #expect(ElementCallStageLayout.fullscreenScrimZIndex > ElementCallStageLayout.spotlightZIndex + 0.5)
+        #expect(ElementCallStageLayout.fullscreenScrimZIndex < ElementCallStageLayout.fullscreenZIndex)
+    }
+    
     @Test
     func theFullScreenTileIsAboveEveryTileItReplaces() throws {
         let tiles = [local, bob, carol] + Self.members(6)
@@ -567,5 +528,24 @@ struct ElementCallStageLayoutTests {
         }
         #expect(compute([local]).pictureInPictureTileID == local.id)
         #expect(compute([local, bob, carol] + Self.members(3), spotlight: bob.id).pictureInPictureTileID == bob.id, "the spotlight wins")
+    }
+    
+    // MARK: - Chrome (017)
+    
+    /// What the screen keeps clear for its chrome. Neither clearance depends on whether the chrome
+    /// is up: the top bar never leaves in portrait (R30), landscape draws over the picture (R4), and
+    /// the grid's end always clears where the control bar sits (R31). So hiding the chrome changes
+    /// nothing the layout is given, and no tile moves or resizes. Only the banner, which is not
+    /// chrome, adds to the top (R3).
+    @Test
+    func theClearancesDoNotDependOnTheChrome() {
+        func top(landscape: Bool = false, fullscreen: Bool = false, banner: CGFloat? = nil) -> CGFloat {
+            ElementCallView.topClearance(isLandscape: landscape, isFullscreen: fullscreen, topBarHeight: 44, bannerHeight: banner)
+        }
+        #expect(top() == 44 + spacing)
+        #expect(top(banner: 28) == 44 + 28 + 2 * spacing)
+        #expect(top(landscape: true) == 0)
+        #expect(top(landscape: true, banner: 28) == 0)
+        #expect(top(fullscreen: true) == 0)
     }
 }

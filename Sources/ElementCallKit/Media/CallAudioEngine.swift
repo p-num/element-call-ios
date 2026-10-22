@@ -42,6 +42,8 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
     private var sinkNode: AVAudioSinkNode?
     private var renderBlocks = [String: SourceRenderBlock]()
     private var sourceNodes = [String: AVAudioSourceNode]()
+    private var soundEffectBlock: SourceRenderBlock?
+    private var soundEffectNode: AVAudioSourceNode?
     private var isRunning = false
     private var configurationObserver: NSObjectProtocol?
     
@@ -50,8 +52,9 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
     ///
     /// `@unchecked` because AVFAudio's block typealiases are not `@Sendable`, and the attribute
     /// cannot be applied to a typealias, so there is no way to state what is actually true here:
-    /// the only thing either box ever carries is `MicrophoneTap.receiverBlock` or
-    /// `AudioPlaybackRenderer.renderBlock`, and each of those captures exactly one object, itself
+    /// the only thing either box ever carries is `MicrophoneTap.receiverBlock`,
+    /// `AudioPlaybackRenderer.renderBlock` or `CallSoundEffectRenderer.renderBlock`, and each of those
+    /// captures exactly one object, itself
     /// `@unchecked Sendable` and hand-synchronised for the render thread. Re-declaring Apple's
     /// signatures with `@Sendable` would make it checked, at the cost of duplicating them in six
     /// places that would silently drift. Keep one stored property each, or that reasoning lapses.
@@ -130,6 +133,17 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
         }
     }
     
+    /// The call's sound effects: one node for the life of the call, mixed like a member.
+    /// Not keyed with the members, so no member ID can ever collide with it.
+    func setSoundEffectSource(render: @escaping AVAudioSourceNodeRenderBlock) {
+        let boxed = SourceRenderBlock(block: render)
+        queue.async { [weak self] in
+            guard let self else { return }
+            soundEffectBlock = boxed
+            attachSoundEffectNode()
+        }
+    }
+    
     /// Call from CallKit's `didActivate` (or directly on the simulator, where CallKit never activates).
     func start() {
         queue.async { [weak self] in self?.startNow() }
@@ -165,6 +179,11 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
             }
             sourceNodes.removeAll()
             renderBlocks.removeAll()
+            if let soundEffectNode {
+                engine.detach(soundEffectNode)
+                self.soundEffectNode = nil
+            }
+            soundEffectBlock = nil
             inputReceiver = nil
             MatrixRTCLog.info("Audio engine shut down")
         }
@@ -214,6 +233,7 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
         for memberID in renderBlocks.keys {
             attachSourceNode(for: memberID)
         }
+        attachSoundEffectNode()
         
         engine.prepare()
         do {
@@ -277,5 +297,18 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
         engine.attach(node)
         engine.connect(node, to: engine.mainMixerNode, format: AudioFormat.float32)
         sourceNodes[memberID] = node
+    }
+    
+    private func attachSoundEffectNode() {
+        dispatchPrecondition(condition: .onQueue(queue))
+        if let soundEffectNode {
+            engine.detach(soundEffectNode)
+            self.soundEffectNode = nil
+        }
+        guard let soundEffectBlock else { return }
+        let node = AVAudioSourceNode(format: AudioFormat.float32, renderBlock: soundEffectBlock.block)
+        engine.attach(node)
+        engine.connect(node, to: engine.mainMixerNode, format: AudioFormat.float32)
+        soundEffectNode = node
     }
 }

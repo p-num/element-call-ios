@@ -133,6 +133,9 @@ public nonisolated struct ElementCallTokenIcons: ElementCallIconRenderingProtoco
         case .shareScreen: icons.shareScreenSolid
         case .volumeOn: icons.volumeOnSolid
         case .volumeOff: icons.volumeOffSolid
+        case .headphones: icons.headphonesSolid
+        // Compound has no Bluetooth glyph yet; design is drawing one.
+        case .bluetooth: icons.headphonesSolid
         case .raisedHand: icons.raisedHandSolid
         case .userProfile: icons.userProfileSolid
         case .overflow: icons.overflowHorizontal

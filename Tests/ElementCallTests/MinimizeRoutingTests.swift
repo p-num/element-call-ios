@@ -13,7 +13,7 @@ import Testing
 /// Where a minimized call goes, which the controller decides and the host carries out.
 ///
 /// This is the branch the example harness runs on and the one a host has to implement, and it had no
-/// coverage at all: the system window needs a bound `MatrixRTCCall`, so every test, preview and
+/// coverage at all: the system window needs a bound `MatrixRTCMediaSession`, so every test, preview and
 /// harness takes the other path, and nothing said so.
 @Suite("Minimizing")
 struct MinimizeRoutingTests {

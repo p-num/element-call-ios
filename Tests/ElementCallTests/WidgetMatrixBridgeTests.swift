@@ -159,29 +159,108 @@ nonisolated struct WidgetMatrixBridgeTests {
         let third = try #require(await snapshots.next())
         #expect(third.count == 2)
         #expect(third.first { $0.stateKey == "@bob" }?.contentJSON == "{}")
-        #expect(third.first { $0.stateKey == "@bob" }?.originServerTimestamp == Date(timeIntervalSince1970: 1.7))
+        #expect(third.first { $0.stateKey == "@bob" }?.originServerTimestamp == 1700)
+    }
+    
+    /// Nothing is known before the machine's initial push, so nothing is said. After it an empty set
+    /// is the truth and is said like any other: the core waits for one set of every type before the
+    /// room is ready.
+    @Test
+    func stateIsEmittedFromTheInitialPushOnEmptyIncluded() async throws {
+        let bridge = try await negotiated(makeBridge())
+        var members = bridge.stateEvents(eventType: "org.matrix.msc3401.call.member").makeAsyncIterator()
+        var slots = bridge.stateEvents(eventType: "m.rtc.slot").makeAsyncIterator()
+        
+        channel.push(toWidget(action: "update_state", requestID: "initial", data: ["state": [stateEvent(key: "@alice", eventID: "$a1")]]))
+        _ = try await nextSent()
+        #expect(try #require(await members.next()).map(\.stateKey) == ["@alice"])
+        #expect(try #require(await slots.next()).isEmpty)
+        
+        // A late subscriber gets the current set at once, an empty one included.
+        var late = bridge.stateEvents(eventType: "org.matrix.msc3401.call.member").makeAsyncIterator()
+        #expect(try #require(await late.next()).map(\.stateKey) == ["@alice"])
+        var lateSlots = bridge.stateEvents(eventType: "org.matrix.msc4143.rtc.slot").makeAsyncIterator()
+        #expect(try #require(await lateSlots.next()).isEmpty)
+        
+        // Only the changed type is fed afterwards; the slot feeds stay silent.
+        channel.push(toWidget(action: "update_state", requestID: "s2", data: ["state": [stateEvent(key: "@bob", eventID: "$b1")]]))
+        _ = try await nextSent()
+        #expect(try #require(await late.next()).count == 2)
+        await bridge.stop()
+        #expect(await slots.next() == nil)
+        #expect(await lateSlots.next() == nil)
     }
     
     @Test
-    func lateSubscriberGetsTheCurrentStateAndEmptyStateIsNeverEmitted() async throws {
+    func noStateIsEmittedBeforeTheInitialPush() async throws {
         let bridge = try await negotiated(makeBridge())
-        channel.push(toWidget(action: "update_state", requestID: "empty", data: ["state": []]))
-        _ = try await nextSent()
-        channel.push(toWidget(action: "update_state", requestID: "s1", data: ["state": [stateEvent(key: "@alice", eventID: "$a1")]]))
-        _ = try await nextSent()
-        
-        var late = bridge.stateEvents(eventType: "org.matrix.msc3401.call.member").makeAsyncIterator()
-        let snapshot = try #require(await late.next())
-        #expect(snapshot.map(\.stateKey) == ["@alice"])
-        
-        var other = bridge.stateEvents(eventType: "m.room.name").makeAsyncIterator()
-        channel.push(toWidget(action: "update_state", requestID: "s2", data: ["state": [stateEvent(key: "@bob", eventID: "$b1")]]))
-        _ = try await nextSent()
-        // Only the subscribed type is fed; the name feed stays silent.
-        let next = try #require(await late.next())
-        #expect(next.count == 2)
+        var members = bridge.stateEvents(eventType: "org.matrix.msc3401.call.member").makeAsyncIterator()
         await bridge.stop()
-        #expect(await other.next() == nil)
+        #expect(await members.next() == nil)
+    }
+    
+    // MARK: - Timeline
+    
+    @Test
+    func timelineEventsOfTheAskedTypesAreDelivered() async throws {
+        let bridge = try await negotiated(makeBridge())
+        var reactions = bridge.timelineEvents(eventTypes: ["io.element.call.reaction"]).makeAsyncIterator()
+        
+        channel.push(toWidget(action: "send_event", requestID: "other", data: timelineEvent(type: "m.reaction", eventID: "$other")))
+        _ = try await nextSent()
+        channel.push(toWidget(action: "send_event", requestID: "hand", data: timelineEvent(type: "io.element.call.reaction", eventID: "$hand")))
+        _ = try await nextSent()
+        
+        let batch = try #require(await reactions.next())
+        #expect(batch.map(\.eventID) == ["$hand"])
+        #expect(batch.first?.stateKey == nil)
+        #expect(batch.first?.sender == "@bob:example.org")
+        #expect(batch.first?.contentJSON == #"{"emoji":"✋"}"#)
+        #expect(batch.first?.encryptionInfo == nil)
+    }
+    
+    /// The timeline has no replay, so its feeds are open from the moment they are asked for and
+    /// close for good with the bridge.
+    @Test
+    func timelineFeedsEndWithTheBridgeAndStayClosed() async throws {
+        let bridge = try await negotiated(makeBridge())
+        var reactions = bridge.timelineEvents(eventTypes: ["m.reaction"]).makeAsyncIterator()
+        var redactions = bridge.redactions().makeAsyncIterator()
+        await bridge.stop()
+        #expect(await reactions.next() == nil)
+        #expect(await redactions.next() == nil)
+        
+        var late = bridge.timelineEvents(eventTypes: ["m.reaction"]).makeAsyncIterator()
+        #expect(await late.next() == nil)
+    }
+    
+    /// Room version 11 moved `redacts` into the content; both shapes are in the wild.
+    @Test
+    func redactionsAreDeliveredInBothShapes() async throws {
+        let bridge = try await negotiated(makeBridge())
+        var redactions = bridge.redactions().makeAsyncIterator()
+        
+        var old = timelineEvent(type: "m.room.redaction", eventID: "$r1", content: [:])
+        old["redacts"] = "$hand1"
+        channel.push(toWidget(action: "send_event", requestID: "old", data: old))
+        _ = try await nextSent()
+        channel.push(toWidget(action: "send_event", requestID: "v11", data: timelineEvent(type: "m.room.redaction", eventID: "$r2", content: ["redacts": "$hand2"])))
+        _ = try await nextSent()
+        
+        #expect(await redactions.next() == "$hand1")
+        #expect(await redactions.next() == "$hand2")
+    }
+    
+    @Test
+    func transportsArePassedOnVerbatim() async throws {
+        let bridge = try await negotiated(makeBridge())
+        let transports = Task { await bridge.rtcTransports() }
+        let request = try await nextSent()
+        #expect(request["action"] as? String == "org.matrix.msc4515.get_rtc_transports")
+        channel.push(response(to: request, ["rtc_transports": [["type": "livekit", "livekit_service_url": "https://sfu.example.org"]]]))
+        let json = try await transports.value.get()
+        let parsed = try #require(JSONSerialization.jsonObject(with: Data(json.utf8)) as? [[String: String]])
+        #expect(parsed == [["type": "livekit", "livekit_service_url": "https://sfu.example.org"]])
     }
     
     // MARK: - To-device
@@ -200,7 +279,7 @@ nonisolated struct WidgetMatrixBridgeTests {
         #expect(message.attestedSenderID == "@bob:example.org")
         #expect(message.senderDeviceID == "BOBDEVICE")
         #expect(message.wasEncrypted)
-        #expect(message.isSenderCrossSigned)
+        #expect(message.isSenderCrossSigned == true)
         #expect(message.contentJSON.contains(#""device_id":"BOBDEVICE""#))
         
         // The current Element Call shape puts the device inside `member`.
@@ -219,7 +298,7 @@ nonisolated struct WidgetMatrixBridgeTests {
         _ = try await nextSent()
         let cleartext = try #require(await messages.next())
         #expect(!cleartext.wasEncrypted)
-        #expect(!cleartext.isSenderCrossSigned)
+        #expect(cleartext.isSenderCrossSigned == false)
         #expect(cleartext.senderDeviceID == nil)
     }
     
@@ -402,6 +481,15 @@ nonisolated struct WidgetMatrixBridgeTests {
     
     private func response(to request: [String: Any], error: [String: Any]) -> [String: Any] {
         response(to: request, ["error": error])
+    }
+    
+    private func timelineEvent(type: String, eventID: String, content: [String: Any] = ["emoji": "✋"]) -> [String: Any] {
+        ["type": type,
+         "sender": "@bob:example.org",
+         "event_id": eventID,
+         "room_id": "!room:example.org",
+         "origin_server_ts": 1800,
+         "content": content]
     }
     
     private func stateEvent(key: String, eventID: String, content: [String: Any] = ["memberships": []]) -> [String: Any] {

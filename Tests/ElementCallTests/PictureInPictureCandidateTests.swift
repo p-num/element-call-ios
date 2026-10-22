@@ -17,15 +17,15 @@ nonisolated struct PictureInPictureCandidateTests {
     func theSpotlightsOwnStreamIsWhatTheWindowContinues() {
         let tiles = roster(tile("bob", kind: .screenShare), tile("bob", hasVideo: true), tile("carol", hasVideo: true))
         let share = MatrixRTCTileID(memberID: "bob", kind: .screenShare)
-        #expect(MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: share) == share)
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: share) == share)
         let camera = MatrixRTCTileID(memberID: "bob", kind: .person)
-        #expect(MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: camera) == camera)
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: camera) == camera)
     }
     
     @Test
     func fallsBackToTheHighestRankedVideoWhenTheSpotlightHasNone() {
         let tiles = roster(tile("bob"), tile("carol", hasVideo: true))
-        let candidate = MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: MatrixRTCTileID(memberID: "bob"))
+        let candidate = MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: MatrixRTCTileID(memberID: "bob"))
         #expect(candidate == MatrixRTCTileID(memberID: "carol", kind: .person))
     }
     
@@ -36,21 +36,51 @@ nonisolated struct PictureInPictureCandidateTests {
     func aSpotlightWhoseTileIsGoneFallsBackRatherThanAttachingToNothing() {
         let tiles = roster(tile("bob", hasVideo: true), tile("carol", hasVideo: true))
         let goneShare = MatrixRTCTileID(memberID: "bob", kind: .screenShare)
-        let candidate = MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: goneShare)
+        let candidate = MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: goneShare)
         #expect(candidate == MatrixRTCTileID(memberID: "bob", kind: .person))
     }
     
     @Test
     func fallsBackToOwnCameraOnlyWhenAvailable() {
         let tiles = roster(tile("bob"))
-        #expect(MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: nil) == MatrixRTCTileID(memberID: me, kind: .person))
-        #expect(MatrixRTCCall.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: false, spotlight: nil) == nil)
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: nil) == MatrixRTCTileID(memberID: me, kind: .person))
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: false, spotlight: nil) == nil)
+    }
+    
+    // MARK: - Exact (019 R15)
+    
+    /// A small call's speaker with their camera off is not swapped for whoever ranks first: the
+    /// window shows the placeholder, which names them.
+    @Test
+    func anExactTileWithoutVideoGivesThePlaceholderNotSomebodyElse() {
+        let tiles = roster(tile("bob"), tile("carol", hasVideo: true))
+        let bob = MatrixRTCTileID(memberID: "bob")
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: bob, isExact: true) == nil)
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: bob) == "bob")
+        let carol = MatrixRTCTileID(memberID: "carol")
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: carol, isExact: true) == carol)
+    }
+    
+    /// Exact only while the tile is in the call: one that has left falls back as before.
+    @Test
+    func anExactTileThatHasLeftFallsBack() {
+        let tiles = roster(tile("carol", hasVideo: true))
+        let candidate = MatrixRTCMediaSession.pictureInPictureCandidate(tiles: tiles, localMemberID: me, isLocalCameraAvailable: true, spotlight: MatrixRTCTileID(memberID: "bob"), isExact: true)
+        #expect(candidate == MatrixRTCTileID(memberID: "carol", kind: .person))
+    }
+    
+    /// Alone, the window shows our camera, or the placeholder with it off.
+    @Test
+    func ourselvesExactlyIsOurCameraOrNothing() {
+        let own = MatrixRTCTileID(memberID: me, kind: .person)
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: .empty, localMemberID: me, isLocalCameraAvailable: true, spotlight: own, isExact: true) == own)
+        #expect(MatrixRTCMediaSession.pictureInPictureCandidate(tiles: .empty, localMemberID: me, isLocalCameraAvailable: false, spotlight: own, isExact: true) == nil)
     }
     
     @Test
     func placeholderNamesTheSpotlightWhenItIsSomebodyElse() {
         let tiles = roster(tile("bob"), tile("carol"))
-        #expect(MatrixRTCCall.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: "carol")) == "carol")
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: "carol")) == "carol")
     }
     
     /// Our own tile is never in the order, so a spotlight on us names nobody in it and the window
@@ -58,16 +88,16 @@ nonisolated struct PictureInPictureCandidateTests {
     @Test
     func placeholderSkipsTheSpotlightWhenItIsUs() {
         let tiles = roster(tile("bob"))
-        #expect(MatrixRTCCall.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: me)) == "bob")
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: me)) == "bob")
     }
     
     @Test
     func placeholderFallsBackToTheFirstRemoteMemberAndIsNilWhenAlone() {
         let tiles = roster(tile("bob"), tile("carol"))
-        #expect(MatrixRTCCall.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: nil) == "bob")
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: nil) == "bob")
         // A spotlight naming nobody in the call must not be shown either.
-        #expect(MatrixRTCCall.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: "dave")) == "bob")
-        #expect(MatrixRTCCall.pictureInPicturePlaceholderMemberID(tiles: .empty, spotlight: nil) == nil)
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: tiles, spotlight: MatrixRTCTileID(memberID: "dave")) == "bob")
+        #expect(MatrixRTCMediaSession.pictureInPicturePlaceholderMemberID(tiles: .empty, spotlight: nil) == nil)
     }
     
     private func tile(_ memberID: String, kind: MatrixRTCTileKind = .person, hasVideo: Bool? = nil) -> MatrixRTCTile {

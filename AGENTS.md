@@ -95,7 +95,11 @@ them**, despite the comment in `tests.yml` saying so: `XCODE_APP`, `SIMULATOR_NA
 `SIMULATOR_RUNTIME` are duplicated literals in both workflow files, so changing the pinned device is
 three edits, not one. `release.yml` is deliberately not a fourth: it runs on Linux and gates on the
 `Tests` run for the commit rather than testing anything itself, and the example harness below is not
-a fourth either: it is a step in the same `Tests` job and reuses the simulator that job creates.
+a fourth either: its `ui-tests` job, sharded by test class so the wall clock is the longest shard
+rather than all 18 minutes, reads the same workflow-level `env` as the package job. One shard,
+`chrome-ios18`, swaps the runtime for iOS 18, the oldest supported: SwiftUI hands a tap on a tile to
+the stage behind it there as well, which no iOS 26 run can see. **A new UI test class must be added to a shard** in that job's matrix and to its `SHARDED` list; the job fails if one
+is in none.
 
 ### The example harness and the UI tests
 
@@ -125,8 +129,8 @@ xcodebuild test -project Example/ElementCallExample.xcodeproj \
   bar is drawn from one, which needs only a room name, a style and a duration. Two things a fake
   cannot know: the mic glyph reads through `call`, which is nil, so the bar always shows unmuted;
   and `connectedAt` has to be passed in, which is why `fake(...)` takes it.
-- **The app opens on a catalogue of fixtures, and minimizes back to it.** `-fixture <key>`
-  skips the catalogue and opens that fixture directly, and `-scenario <name>` plays a scenario
+- **The app opens on a catalogue of fixtures, and minimizes back to it**, at the row last opened.
+  `-fixture <key>` skips the catalogue and opens that fixture directly, and `-scenario <name>` plays a scenario
   file, so a test starts where it means to rather than tapping its way there — with the argument
   present the view hierarchy is what it was before the catalogue existed, which is what keeps the older UI tests looking at the tree they were
   written against. The argument used to fall back to the group arrangement on anything it did not
@@ -150,18 +154,25 @@ xcodebuild test -project Example/ElementCallExample.xcodeproj \
 - **Put a test here only if it needs a real touch.** Arrangement belongs in
   `ElementCallStageLayoutTests`, appearance in the snapshots, and geometry in a unit test: a UI test
   is twenty seconds against their twenty milliseconds. What earns its place is gesture arbitration —
-  the scroller's pan against the spotlight's swipe and a tile's pan, and the `Button` inside a tile — and the minimize
+  the scroller's pan against the spotlight's swipe and a tile's pan, the `Button` inside a tile, and
+  our floating tile's drag against the flip button on it — and the minimize
   round trip, which is three real-touch questions at once: whether the identifier reaches a view at
   all, whether the button in the top bar wins the touch, and whether the bar is hittable where a
   host puts it. Which branch the controller takes when asked to minimize is *not* one of them; that
   is `MinimizeRoutingTests`, in process, in milliseconds.
+- **CI runs these about five times slower than a Mac, and retries a failure up to twice.** Never
+  race a timer: a look at the tree on `two_hundred` can take longer than eight seconds there. A
+  test that checks something before a timer undoes it sets the timer from a launch argument, as
+  `-chromeReturnDelay` does. Only these tests are retried; the package tests are not, because a
+  flake there has been a real race.
 - **Every tile with video draws real frames**, from `MatrixRTCTestPattern` (the `video` fixture is
   the one built for looking at them): colour bars with a
   heavy border, because the questions are geometric. A border running off the edges is a crop, a
   border with black beside it is a letterbox, and a border that changes thickness partway through a
   move is the picture being stretched rather than redrawn. Some members are portrait sources and
-  some landscape, so both answers are on the stage at once. It reaches the tiles through
-  `ElementCallPreviewVideo`, an environment value consulted only where there is no call — nil in
+  some landscape, so both answers are on the stage at once, and ours follows the stage's
+  orientation, as a camera does, so our floating tile shows both of its shapes. It reaches the
+  tiles through `ElementCallPreviewVideo`, an environment value consulted only where there is no call — nil in
   every shipping build.
   
   Keep it honest, or it is worse than nothing. The pattern is generated a row at a time, one frame
@@ -180,6 +191,12 @@ xcodebuild test -project Example/ElementCallExample.xcodeproj \
   to stay put moved it by a screen. `ElementCallSpotlightPanGesture` is a
   `UIGestureRecognizerRepresentable` whose delegate makes the scroll view's pan wait for it to
   fail, which is the only thing that keeps a drag starting on the spotlight off the grid.
+- **Our floating tile's drag is a UIKit pan too**, `ElementCallOwnTileDragGesture`, on the content
+  root rather than the tile, for the spotlight's reason: a recognizer on the tile hit-tests above
+  its flip button. A pan begins only on movement and then cancels the button's touch, so a tap is
+  the button's and a drag from it is the tile's. Two traps, both in the code: the action fires on
+  the representable it was made with, so it reads the coordinator's copy; and the pan's velocity is
+  that of the last movement, so a release after a pause is a drop, not a throw.
 
 - **A glass button is interactive glass, always.** Plain `glassEffect` is not wired for touch: a
   plain-glass button drawn over the stage's content took no taps, on the simulator and on a phone,
@@ -259,7 +276,7 @@ touch Tests/ElementCallTests/.record-snapshots
 ```
 
 **Prefer that to deleting the directory.** Deleting also works — the harness records whatever is
-missing — but it re-records all 93 images rather than the few that changed, and PNG re-encoding is
+missing — but it re-records every image rather than the few that changed, and PNG re-encoding is
 not byte-identical across Xcode versions. The references are ordinary blobs rather than Git LFS
 pointers (see CONTRIBUTING.md for why they must stay that way), so a wholesale re-record puts 6 MB
 of new blobs in the repository permanently and buries the images a reviewer has to look at.
@@ -283,20 +300,42 @@ coverage.
 
 ---
 
+## The stage's two layouts
+
+`ElementCallStageLayout.compute` picks one of two arrangements: spec 019's small-call layout
+(`ElementCallSmallCallLayout`) for up to five tiles with no remote screen share, and spec 003's grid
+otherwise. Both are pure arithmetic producing the same `ElementCallStageLayout`, drawn by the one
+`ElementCallStage`.
+
+- **Never make the small layout a view of its own.** A tile that changes view hierarchy remounts its
+  video view, falls back to its avatar and resubscribes; crossing five and six people is meant to
+  be every tile moving.
+- **The small layout places people in the core's order, which is their join order** because the
+  view model sets the core's ranking threshold (`ElementCallSmallCallLayout.rankingThreshold`) to
+  every remote tile the layout can hold. Above it the core ranks by activity, so a threshold that
+  fell below the layout's size would move people whenever someone talks. Never re-sort `tiles`.
+- **Our floating tile's corner is the context's** (`ownTileCorner`), since the stage unmounts while
+  minimized. Corners are physical: a right-to-left locale mirrors the stage's positions, and
+  `ElementCallStage.drawnFrame` mirrors our tile back.
+
 ## Releasing
 
 A release is a **tag**, nothing more. Bare semver — `0.1.0`, `0.2.0-rc.1` — because that is what
 SwiftPM matches a host's `exactVersion` against, and **nothing is bumped in a pull request**: there
 is no `MARKETING_VERSION` and nobody edits a version by hand.
 
-There is one version constant, `ElementCallVersion.current`, which the call screen shows so a bug
-report can quote it. **`scripts/release.sh` stamps it**, in the same step that closes the
+There is one version constant of our own, `ElementCallVersion.current`, which the call screen shows
+so a bug report can quote it. **`scripts/release.sh` stamps it**, in the same step that closes the
 `## Unreleased` heading, so it lands inside the commit the release tags and a host resolving that tag
 gets a tree that describes itself. The script fails the release if the rewrite does not take, and
 `release.yml` names the file in its `git add` — the commit is path-explicit, not `git add -A`, so a
 new generated file has to be named there or it never reaches the tag. On `main` between releases the
 constant reads as the previous release, which is only ever visible in a build made from this
 repository rather than from a tag.
+
+`ElementCallVersion.core` sits beside it and names the matrix-rust-rtc release, which the menu shows
+as Android's does. It is read from the core's own `sdkVersion()`, so moving the `Package.swift` pin
+needs no other edit.
 
 The pipeline is `.github/workflows/release.yml` plus `scripts/release.sh`, which holds all of the
 validation and never touches the remote so it can be rehearsed locally. Release notes come from the
@@ -322,18 +361,34 @@ Swift packages are released. Do not add a `binaryTarget` or a build-and-attach s
 workflow. [RELEASING.md](RELEASING.md) has the reasoning and the trigger that would justify revisiting
 it.
 
+## The core's Matrix backend
+
+The core reaches Matrix through one object, `MatrixRTCBackend`, which routes its flat, room-ID calls
+to the `ElementCallMatrixRoomProtocol` that `MatrixRTCClient` opened. Two things about it are easy to
+break:
+
+- **Every set-shaped feed of a room delivers its current set first, an empty one included.** The
+  core treats a room as ready only once each subject has delivered once, and has no deadline of its
+  own; holding back an empty set makes the join hang until `MatrixRTCClient.seedingTimeout`. The
+  joined members are the exception that proves it: they always include us, so an empty read is the
+  store not having loaded and is rightly held back.
+- **Failures are passed on, never classified.** `MatrixRTCTransportError.failed` carries the
+  homeserver's `errcode` and status; the core decides which refusals retire the delayed leave.
+
+The room is closed only after `MatrixRTCRoom.shutdown()`, because the core leaves through it.
+
 ## What is temporary
 
 `Sources/ElementCallMatrix/Widget/` drives the SDK's widget driver in process as a stand-in for
-bindings the released SDK lacks: delayed events, a room-state feed, to-device messaging. It is
-**scheduled for deletion**, and `WidgetMatrixBridge.swift`'s header lists the exact bindings that
+bindings the released SDK lacks: delayed events, room-state and timeline feeds, to-device messaging. It
+is **scheduled for deletion**, and `WidgetMatrixBridge.swift`'s header lists the exact bindings that
 retire it and the removal steps. Do not build new features on it, and do not let it leak past
-`ElementCallSDKTransport`.
+`ElementCallSDKTransport` and `ElementCallSDKRoom`.
 
-`openBridge` is the **only** place a bridge is created, deliberately. An earlier version had two
-creation paths and only one wired up the to-device pump, so media keys reached nobody and every remote
-tile went black. The bridge and its pump are one value now so the type system forbids that. Keep it
-that way.
+`openBridge`, reached only through `openRoom`, is the **only** place a bridge is created,
+deliberately. An earlier version had two creation paths and only one wired up the to-device pump, so
+media keys reached nobody and every remote tile went black. The bridge and its pump are one value now
+so the type system forbids that. Keep it that way.
 
 ---
 

@@ -40,7 +40,7 @@ struct DeveloperModeTests {
         let options = ElementCallOptions()
         
         #expect(options.isPictureInPictureEnabled)
-        #expect(options.elementCallCompatibility == .stateEvents)
+        #expect(options.membershipFormat == .roomState)
         #expect(!options.isDeveloperModeEnabled)
         #expect(!options.isScreenSharingEnabled)
         #expect(!options.isAutomaticPictureInPictureForAudioCallsEnabled)
@@ -76,5 +76,6 @@ struct DeveloperModeTests {
     func theVersionIsStamped() {
         #expect(!ElementCallVersion.current.isEmpty)
         #expect(ElementCallVersion.current.first?.isNumber == true)
+        #expect(ElementCallVersion.core.first?.isNumber == true)
     }
 }

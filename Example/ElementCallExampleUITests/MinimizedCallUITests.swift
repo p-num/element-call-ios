@@ -62,7 +62,8 @@ final class MinimizedCallUITests: XCTestCase {
         
         bar.tap()
         
-        XCTAssertTrue(carol.waitForExistence(timeout: 5), "Tapping the bar should restore the call.")
+        // Restoring remounts the stage and its accessibility tree, just as opening the fixture does.
+        XCTAssertTrue(carol.waitForExistence(timeout: 10), "Tapping the bar should restore the call.")
         XCTAssertFalse(bar.exists, "The bar belongs to a minimized call only.")
     }
     
@@ -88,13 +89,26 @@ final class MinimizedCallUITests: XCTestCase {
         for _ in 0..<4 where !joining.isHittable {
             app.swipeUp()
         }
+        // Then all of it on screen, not merely some: `isHittable` is true for a row cut off by the
+        // bottom edge, and the tap goes to its centre, below the screen, and taps nothing. A short
+        // drag rather than another swipe, which scrolls a row clean past the top.
+        let screen = app.windows.firstMatch.frame
+        if !screen.contains(joining.frame) {
+            let start = app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.6))
+            start.press(forDuration: 0.1, thenDragTo: start.withOffset(CGVector(dx: 0, dy: -200)))
+        }
+        // Said here rather than left to the tap, which on a row off screen taps nothing and fails
+        // the next line about a screen that never opened.
+        XCTAssertTrue(screen.contains(joining.frame), "The joining row should be on screen.")
         joining.tap()
         XCTAssertTrue(app.buttons["elementCall.hangUp"].waitForExistence(timeout: 10),
                       "A connecting fixture should open its screen too.")
         
         app.buttons["elementCall.hangUp"].tap()
         
-        XCTAssertTrue(row.waitForExistence(timeout: 5),
+        // The catalogue comes back at the row just closed, not at the top, so that is the row to
+        // look for: one a long way above it is not built at all by a lazy list.
+        XCTAssertTrue(joining.waitForExistence(timeout: 5),
                       "A controller-driven call should come back to the catalogue as well.")
     }
 }

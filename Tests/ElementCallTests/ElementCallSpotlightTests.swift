@@ -25,7 +25,7 @@ struct ElementCallSpotlightTests {
                         isMicrophoneMuted: false,
                         hasVideo: kind == .screenShare,
                         isSpeaking: isSpeaking,
-                        hasHandRaised: false,
+                        handPosition: nil,
                         isHero: isHero,
                         stats: nil)
     }

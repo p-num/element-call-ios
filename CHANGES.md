@@ -11,6 +11,52 @@ version will actually read it.
 
 ## Unreleased
 
+**`ElementCallActiveSpeakerGradient` is now `ElementCallBorderGradient.activeSpeaker`**, beside
+`.raisedHand`. A host theme that draws its own speaking ring can do the same for a raised hand by
+implementing `raisedHandBorder(in:)`; the default is design's.
+
+## 0.1.0-rc.10 - 2026-10-08
+
+**`MatrixRTCCall` is renamed `MatrixRTCMediaSession`, and `MatrixRTCElementCallCompat` is renamed
+`MatrixRTCMembershipFormat`.** The cases are `current`, `sticky2025` and `roomState` (were `off`,
+`stickyEvents` and `stateEvents`), and `ElementCallOptions.elementCallCompatibility` is
+`membershipFormat`.
+
+**The core is room-first, and the Matrix port is per room.** `ElementCallStack.start()` and `stop()`
+are gone: there is nothing to start. A host implementing `ElementCallMatrixTransportProtocol` itself
+implements `openRoom(roomID:)`, returning an `ElementCallMatrixRoomProtocol` that carries every room
+send and feed and is closed when the call ends; transport discovery moves onto the room as raw JSON.
+Every set-shaped feed delivers its current set first, an empty one included, and events cross as raw
+`ElementCallRoomEvent`s. Report failures as `MatrixRTCTransportError.failed` with the homeserver's
+`errcode` and status rather than classifying them, and `MatrixRTCToDeviceMessage.isSenderCrossSigned`
+is optional, nil when the client does not say. `ElementCallController.session` is `rtcCall`, a
+`MatrixRTCCall`, and a call whose slot is closed ends with `MatrixRTCEndReason.slotClosed`. Hosts using
+`ElementCallSDKTransport` change nothing but the `start()` call.
+
+**`ElementCallThemeProtocol` gains `activeSpeakerBorder(in:)`, the fill of the speaking ring.** It
+defaults to the design's gradient; implement it to brand the ring, returning one colour for a plain one.
+
+
+
+### What's Changed
+
+✨ Features
+* Show/Hide control bar behavior. by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/50
+* Show the matrix-rust-rtc version in the overflow menu by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/53
+* New optimized layout for small calls, 1:1 and less than 5 by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/55
+* Make the audio button a menu when a headset is connected by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/56
+
+🐛 Bugfixes
+* Fix: Draw the speaking ring as per design's gradient by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/54
+
+Others
+* Release 0.1.0-rc.9 by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/49
+
+
+**Full Changelog**: https://github.com/element-hq/element-call-ios/compare/0.1.0-rc.9...0.1.0-rc.10
+
+## 0.1.0-rc.9 - 2026-09-29
+
 **`ElementCallLayout` and `ElementCallScreenViewState.layout` are removed, and
 `ElementCallScreenViewState.spotlightID` is stored rather than computed.** The one-to-one arrangement
 (the other person full-bleed, ourselves as a thumbnail) is retired by the call layout spec: two people
@@ -102,6 +148,22 @@ For a host reading the view state:
 **`MatrixRTCCall.isScreenSharing` is now derived from publication state**, not from what the app
 asked for, so it goes false however a share ended. A capture stopped from outside the app — Control
 Centre, another app taking the recorder — now unpublishes rather than leaving a dead share published.
+
+
+
+### What's Changed
+
+✨ Features
+* Feat: New grid-layout with hero spotlight when needed by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/46
+
+🐛 Bugfixes
+* Fix: Legacy Format, stop inferring a sender device for key messages that name none by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/45
+
+🧱 Build
+* chore: Use the new core tiles model by @BillCarsonFr in https://github.com/element-hq/element-call-ios/pull/41
+
+
+**Full Changelog**: https://github.com/element-hq/element-call-ios/compare/0.1.0-rc.8...0.1.0-rc.9
 
 ## 0.1.0-rc.8 - 2026-09-22
 

@@ -17,8 +17,58 @@ import UIKit
 /// track stays published and muted at the transport, so peers see a deliberate camera-off rather
 /// than a track disappearing.
 final nonisolated class CameraCapturer: NSObject, AVCaptureVideoDataOutputSampleBufferDelegate, @unchecked Sendable {
-    static let captureWidth: UInt32 = 640
-    static let captureHeight: UInt32 = 480
+    /// The cameras the capturer chooses between. One query for both it and ``hasFrontAndBack``, so
+    /// the flip button is offered on exactly the devices where flipping changes something.
+    private static func discoverCameras() -> [AVCaptureDevice] {
+        AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .unspecified).devices
+    }
+    
+    /// The requested camera, or whatever exists rather than refusing.
+    private static func camera(front: Bool) -> AVCaptureDevice? {
+        let devices = discoverCameras()
+        return devices.first { $0.position == (front ? .front : .back) } ?? devices.first
+    }
+    
+    /// The camera's format and the size its frames are sent at, from the formats our pixel format
+    /// comes in: another subtype would be converted on every frame.
+    private static func captureFormat(of device: AVCaptureDevice) -> (AVCaptureDevice.Format, CameraCaptureFormat)? {
+        let formats = device.formats.filter { CMFormatDescriptionGetMediaSubType($0.formatDescription) == pixelFormat }
+        let candidates = formats.map { format in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            return CameraCaptureFormat.Candidate(width: Int(dimensions.width),
+                                                 height: Int(dimensions.height),
+                                                 maxFrameRate: format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? 0,
+                                                 fieldOfView: Double(format.videoFieldOfView),
+                                                 isBinned: format.isVideoBinned)
+        }
+        return CameraCaptureFormat.choose(from: candidates).map { (formats[$0.candidate], $0) }
+    }
+    
+    private static let pixelFormat = kCVPixelFormatType_420YpCbCr8BiPlanarFullRange
+    
+    /// The size the camera that ``start(track:)`` opens will send, for the publish that precedes it:
+    /// the layers are derived from it, so it has to be what the frames really are.
+    var publishedSize: CameraCaptureFormat.Size {
+        Self.camera(front: isFrontFacing).flatMap(Self.captureFormat)?.1.output ?? CameraCaptureFormat.fallbackOutput
+    }
+    
+    static var hasFrontAndBack: Bool {
+        let positions = Set(discoverCameras().map(\.position))
+        return positions.contains(.front) && positions.contains(.back)
+    }
+    
+    /// Every format a camera offers, one per line: what a bug report needs to answer "what could this
+    /// phone have captured", since the choice between them is ours.
+    static func describeFormats(of device: AVCaptureDevice) -> String {
+        let lines = device.formats.map { format in
+            let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+            let subtype = CMFormatDescriptionGetMediaSubType(format.formatDescription)
+            let fourCC = String(bytes: [24, 16, 8, 0].map { UInt8(truncatingIfNeeded: subtype >> $0) }, encoding: .ascii) ?? "\(subtype)"
+            let rates = format.videoSupportedFrameRateRanges.map { "\(Int($0.minFrameRate))-\(Int($0.maxFrameRate))" }.joined(separator: ",")
+            return "  \(dimensions.width)x\(dimensions.height) \(fourCC) \(rates) fps fov \(String(format: "%.1f", format.videoFieldOfView))\(format.isVideoBinned ? " binned" : "")"
+        }
+        return (["Camera formats, \(device.position == .front ? "front" : "back") \(device.localizedName):"] + lines).joined(separator: "\n")
+    }
     
     private let queue = DispatchQueue(label: "io.element.matrixrtc.camera", qos: .userInitiated)
     private let state = Mutex<State>(.init())
@@ -51,6 +101,18 @@ final nonisolated class CameraCapturer: NSObject, AVCaptureVideoDataOutputSample
                 guard let self, notification.object as? AVCaptureSession === state.withLock({ $0.session }) else { return }
                 MatrixRTCLog.info("Camera interruption ended")
                 onInterruption?(false)
+            },
+            // The one fact about heat a bug report can carry: the camera's encode is the call's
+            // largest cost, and whether it heats a phone is measured rather than assumed.
+            center.addObserver(forName: ProcessInfo.thermalStateDidChangeNotification, object: nil, queue: nil) { _ in
+                let state = switch ProcessInfo.processInfo.thermalState {
+                case .nominal: "nominal"
+                case .fair: "fair"
+                case .serious: "serious"
+                case .critical: "critical"
+                @unknown default: "unknown"
+                }
+                MatrixRTCLog.info("Thermal state \(state)")
             }
         ]
     }
@@ -130,33 +192,54 @@ final nonisolated class CameraCapturer: NSObject, AVCaptureVideoDataOutputSample
     // MARK: - Private
     
     private func configureSession(front: Bool) throws {
-        let position: AVCaptureDevice.Position = front ? .front : .back
-        // Prefer the requested camera, fall back to whatever exists rather than refusing.
-        let discovery = AVCaptureDevice.DiscoverySession(deviceTypes: [.builtInWideAngleCamera], mediaType: .video, position: .unspecified)
-        guard let device = discovery.devices.first(where: { $0.position == position }) ?? discovery.devices.first else {
+        guard let device = Self.camera(front: front) else {
             throw MatrixRTCError.media("No camera available")
+        }
+        MatrixRTCLog.debug(Self.describeFormats(of: device))
+        guard let (format, choice) = Self.captureFormat(of: device) else {
+            throw MatrixRTCError.media("No camera format in \(Self.pixelFormat)")
         }
         let input = try AVCaptureDeviceInput(device: device)
         
         let output = AVCaptureVideoDataOutput()
-        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: kCVPixelFormatType_420YpCbCr8BiPlanarFullRange]
+        // The output scales to the size the layers were declared for; iOS honours the size keys.
+        output.videoSettings = [kCVPixelBufferPixelFormatTypeKey as String: Self.pixelFormat,
+                                kCVPixelBufferWidthKey as String: choice.output.width,
+                                kCVPixelBufferHeightKey as String: choice.output.height]
         output.alwaysDiscardsLateVideoFrames = true
         output.setSampleBufferDelegate(self, queue: queue)
         
         let session = AVCaptureSession()
         session.beginConfiguration()
-        session.sessionPreset = .vga640x480
         guard session.canAddInput(input), session.canAddOutput(output) else {
             session.commitConfiguration()
             throw MatrixRTCError.media("Cannot configure the camera session")
         }
         session.addInput(input)
         session.addOutput(output)
-        // Deliver sensor-native frames; the rotation travels with the frame instead.
+        // After the input is added, and with no `sessionPreset`: a preset applies its own format.
+        // Setting the format is what moves the session to `.inputPriority`, and it holds through
+        // `startRunning`.
+        do {
+            try device.lockForConfiguration()
+            device.activeFormat = format
+            let maxFrameRate = format.videoSupportedFrameRateRanges.map(\.maxFrameRate).max() ?? CameraCaptureFormat.frameRate
+            // A ceiling only: the camera may still slow down in the dark to keep the picture exposed.
+            device.activeVideoMinFrameDuration = CMTime(value: 1, timescale: CMTimeScale(min(CameraCaptureFormat.frameRate, maxFrameRate)))
+            device.unlockForConfiguration()
+        } catch {
+            MatrixRTCLog.warning("Cannot choose the camera format: \(error)")
+        }
+        // Sensor-native frames, with the rotation travelling as metadata: a rotation then changes
+        // neither the frame size nor the track. Upright frames would turn 960x720 into 720x960 on
+        // every rotation, and each receiver would freeze until the encoder's next key frame.
         if let connection = output.connection(with: .video), connection.isVideoRotationAngleSupported(0) {
             connection.videoRotationAngle = 0
         }
         session.commitConfiguration()
+        let dimensions = CMVideoFormatDescriptionGetDimensions(format.formatDescription)
+        MatrixRTCLog.info("Camera format \(dimensions.width)x\(dimensions.height)\(format.isVideoBinned ? " binned" : "") "
+            + "\(String(format: "%.1f", format.videoFieldOfView))°, sending \(choice.output.width)x\(choice.output.height)")
         
         let previous = state.withLock { state -> AVCaptureSession? in
             defer {

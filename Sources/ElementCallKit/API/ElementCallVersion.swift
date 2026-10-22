@@ -5,6 +5,8 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
+import MatrixRtc
+
 /// The version of this package, for a call screen to show and a bug report to quote.
 ///
 /// A constant is a compromise, and it is worth knowing why it exists rather than being derived.
@@ -22,5 +24,11 @@
 /// for a build made from this repository rather than from a tag, and every consumer pins an exact
 /// version, so what a host displays is the version it actually resolved.
 public nonisolated enum ElementCallVersion {
-    public static let current = "0.1.0-rc.8"
+    public static let current = "0.1.0-rc.10"
+    
+    /// The matrix-rust-rtc release, shown beside `current` as Android shows its own.
+    ///
+    /// Asked of the core itself rather than copied from the `Package.swift` pin, so it names the
+    /// binary actually linked, including a local build swapped in for the pin.
+    public static let core = MatrixRtc.sdkVersion()
 }

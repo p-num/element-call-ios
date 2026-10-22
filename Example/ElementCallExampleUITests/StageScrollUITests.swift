@@ -153,10 +153,16 @@ final class StageScrollUITests: XCTestCase {
         let ours = tile("alice")
         XCTAssertTrue(ours.waitForExistence(timeout: 5))
         ours.swipeUp()
+        // Wholly below the spotlight and wholly on screen, not merely hittable: XCUITest calls a
+        // tile scrolled under the sticky spotlight hittable, and the double tap then lands on the
+        // spotlight and takes Carol full screen. Which tile sits there depends on how far the
+        // swipe went, which the chrome hiding on scroll changed.
+        let spotlight = tile("carol").frame
+        let window = app.windows.firstMatch.frame
         let visible = app.otherElements.matching(NSPredicate(format: "identifier BEGINSWITH %@", "elementCall.tile."))
             .allElementsBoundByAccessibilityElement.filter(\.isHittable)
-        XCTAssertGreaterThan(visible.count, 1)
-        let chosen = visible[visible.count / 2]
+        let clear = visible.filter { $0.frame.minY >= spotlight.maxY && window.contains($0.frame) }
+        let chosen = try XCTUnwrap(clear.first, "a tile clear of the spotlight")
         let other = try XCTUnwrap(visible.first { $0.identifier != chosen.identifier })
         chosen.doubleTap()
         let gone = expectation(for: NSPredicate(format: "isHittable == false"), evaluatedWith: other)

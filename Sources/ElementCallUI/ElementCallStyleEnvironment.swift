@@ -20,7 +20,7 @@ public extension EnvironmentValues {
 /// Where a tile's pictures come from when there is no call to pull them from.
 ///
 /// Nil in a shipping build, which is the only state it is ever in there: a real screen has a
-/// ``MatrixRTCCall`` and never consults this. It exists so the example harness can put moving video
+/// ``MatrixRTCMediaSession`` and never consults this. It exists so the example harness can put moving video
 /// on the real stage, because everything the renderer does — fitting against filling, zoom, pan, and
 /// the shape of the picture through a resize — is invisible in a harness whose tiles are all avatars,
 /// and that is exactly the part that is hardest to look at closely in a real call.
@@ -42,4 +42,9 @@ public extension EnvironmentValues {
     /// glass in a landscape frame comes out blank and a reference of the flat fallback at least
     /// says where the buttons are. Glass itself is checked on a device.
     @Entry var elementCallGlassEnabled = true
+    /// How long after the user stops scrolling the chrome a scroll hid comes back (017 R20). The
+    /// default in every shipping build; the example harness lengthens it for its UI tests, which
+    /// check the chrome is away after a scroll and on a slow CI runner did not get to look within
+    /// two seconds, so they saw it already back.
+    @Entry var elementCallChromeReturnDelay: Duration = .seconds(2)
 }

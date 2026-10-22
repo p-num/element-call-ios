@@ -76,6 +76,26 @@ struct ElementCallFullscreenChrome: View {
     }
 }
 
+/// A full-screen tile's raised hand, drawn by the screen for the reason the chrome is, and below
+/// the chrome's top row so the two never overlap and the badge does not move when a tap raises it.
+struct ElementCallFullscreenHandBadge: View {
+    let position: Int
+    
+    var body: some View {
+        VStack(spacing: 0) {
+            HStack(spacing: 0) {
+                ElementCallRaisedHandBadge(position: position)
+                Spacer()
+            }
+            .padding(.horizontal, 16)
+            // The exit button's 44 pt and the row's spacing.
+            .padding(.top, 44 + 8)
+            Spacer()
+        }
+        .allowsHitTesting(false)
+    }
+}
+
 /// The control bar where it floats: along the bottom, over the stage, in both orientations. The
 /// design draws it there in landscape too, over the spotlight, rather than as a rail up the
 /// trailing edge, which is what this used to do.
@@ -116,6 +136,12 @@ struct ElementCallFullscreenChrome_Previews: PreviewProvider, TestablePreview {
     static var previews: some View {
         chrome(Fixtures.bob)
             .previewDisplayName("Muted remote")
+        ZStack {
+            chrome(Fixtures.tile("Erin", handPosition: 2))
+            ElementCallFullscreenHandBadge(position: 2)
+        }
+        .environment(\.colorScheme, .dark)
+        .previewDisplayName("Hand raised")
         chrome(Fixtures.tile("Alice", isLocal: true, hasVideo: true))
             .previewDisplayName("Our own camera")
         chrome(Fixtures.share("Frank"))

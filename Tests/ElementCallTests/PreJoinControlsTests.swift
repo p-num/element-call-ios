@@ -6,7 +6,7 @@
 //
 
 // `@testable` for `applySystemMute`, which a host drives through its CallKit delegate rather than
-// by calling it, and for `MatrixRTCCall`'s internal initialiser.
+// by calling it, and for `MatrixRTCMediaSession`'s internal initialiser.
 @testable import ElementCallHost
 @testable import ElementCallKit
 @testable import ElementCallUI
@@ -34,10 +34,8 @@ struct PreJoinControlsTests {
     /// test that needs to speak *through* one builds the controller itself. The same wiring
     /// otherwise.
     private func makeJoiningController(isAudioCall: Bool = false) -> (ElementCallController, ElementCallFakeSystem) {
-        let transport = ElementCallFakeTransport()
         let system = ElementCallFakeSystem()
-        let controller = ElementCallController(rtcService: MatrixRTCService(transport: transport),
-                                               transport: transport,
+        let controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport()),
                                                system: system,
                                                // The same everything-on options `fake(...)` uses, so
                                                // the two controllers differ only in who holds the ports.
@@ -107,7 +105,7 @@ struct PreJoinControlsTests {
     @Test
     func theMuteGoesIntoThePublishRatherThanAfterIt() async throws {
         let session = FakeMediaSession()
-        let call = MatrixRTCCall(localMemberID: "@me:example.org_DEVICE", mediaSession: session)
+        let call = MatrixRTCMediaSession(localMemberID: "@me:example.org_DEVICE", mediaSession: session)
         
         try await call.publishMicrophone(muted: true)
         
@@ -120,7 +118,7 @@ struct PreJoinControlsTests {
     @Test
     func anUnmutedJoinPublishesUnmuted() async throws {
         let session = FakeMediaSession()
-        let call = MatrixRTCCall(localMemberID: "@me:example.org_DEVICE", mediaSession: session)
+        let call = MatrixRTCMediaSession(localMemberID: "@me:example.org_DEVICE", mediaSession: session)
         
         try await call.publishMicrophone(muted: false)
         

@@ -23,7 +23,7 @@ public enum ElementCallPreviewFixtures {
                             hasVideo: Bool = false,
                             isHero: Bool = false,
                             isSpeaking: Bool = false,
-                            hasHandRaised: Bool = false,
+                            handPosition: Int? = nil,
                             stats: String? = nil) -> ElementCallTile {
         let user = "@\(name.lowercased()):example.com"
         return ElementCallTile(id: MatrixRTCTileID(memberID: "\(user):DEVICE", kind: kind),
@@ -34,14 +34,14 @@ public enum ElementCallPreviewFixtures {
                                isMicrophoneMuted: isMuted,
                                hasVideo: hasVideo,
                                isSpeaking: isSpeaking,
-                               hasHandRaised: hasHandRaised,
+                               handPosition: handPosition,
                                isHero: isHero,
                                stats: stats)
     }
     
     /// A member's screen, which is a tile of its own beside their camera rather than a state of it.
     ///
-    /// Separate from ``tile(_:kind:isLocal:isMuted:hasVideo:isHero:isSpeaking:hasHandRaised:stats:)``
+    /// Separate from ``tile(_:kind:isLocal:isMuted:hasVideo:isHero:isSpeaking:handPosition:stats:)``
     /// so a fixture cannot build one and forget that it shares a member ID with that member's
     /// camera. That sharing is the whole of what changed, and nothing in the suite covered it.
     public static func share(_ name: String, isHero: Bool = true) -> ElementCallTile {
@@ -87,7 +87,9 @@ public enum ElementCallPreviewFixtures {
                                  isDirect: Bool = false,
                                  isMicrophoneMuted: Bool = false,
                                  isScreenSharing: Bool = false,
-                                 isTileStatsVisible: Bool = false) -> ElementCallScreenViewState {
+                                 isTileStatsVisible: Bool = false,
+                                 isScreenSharingEnabled: Bool = false,
+                                 audioOutputs: [CallAudioOutput] = phoneAudioOutputs) -> ElementCallScreenViewState {
         var state = ElementCallScreenViewState(roomName: "Product | Lobby")
         state.isDirect = isDirect
         state.connection = .connected
@@ -98,21 +100,38 @@ public enum ElementCallPreviewFixtures {
         // Members, not tiles: a sharer is two tiles and one person, and the badge on the spotlight
         // counts people. A real call reads this off the session's memberships.
         state.memberCount = tiles.filter { !$0.isScreenShare }.count
-        state.tiles = tiles
+        state.tiles = ElementCallScreenViewState.showingHands(tiles)
         // The screen's own rule, so a preview cannot show a spotlight the app would not choose.
         state.spotlightID = ElementCallSpotlight.choose(tiles: tiles, shownHeroID: nil, lastSpeakerID: nil).tileID
+        state.smallCallSpeakerID = ElementCallSmallCallLayout.speaker(tiles: tiles, held: nil)
+        // The simulator has no camera, so the flip button would never be drawn or tested otherwise.
+        state.canSwitchCamera = true
         state.isMicrophoneMuted = isMicrophoneMuted
         state.isScreenSharing = isScreenSharing
         state.isTileStatsVisible = isTileStatsVisible
-        // The fixtures stand in for a host that has turned everything on, so the previews cover
-        // the fullest chrome. A host with either flag off simply renders less, and the gates are
-        // pinned by DeveloperModeTests rather than by an image.
+        // The first is where a real route starts: the headset when there is one, else the earpiece.
+        state.audioOutputs = audioOutputs
+        state.audioOutput = audioOutputs.first
+        // Developer mode on, so the previews cover the fullest top bar; the gate is pinned by
+        // DeveloperModeTests rather than by an image. Screen share only where a preview asks for
+        // it: with the raised hand it is a sixth control, and six do not fit along a phone's bar
+        // (009 R17), so on by default every reference would show the bar clipped. A share already
+        // running was enabled by the host, so it implies the flag.
         state.isDeveloperModeEnabled = true
-        state.isScreenSharingEnabled = true
+        state.isScreenSharingEnabled = isScreenSharingEnabled || isScreenSharing
+        // Connected is joined, so there is a membership to raise a hand on.
+        state.isHandRaiseAvailable = true
         return state
     }
     
-    public static func noCall() -> MatrixRTCCall? {
+    /// An iPhone with nothing plugged in or paired: the control bar's audio button is a toggle.
+    public static let phoneAudioOutputs: [CallAudioOutput] = [.receiver, .speaker]
+    /// AirPods connected: the button is a menu, and the call starts in the AirPods.
+    public static let headsetAudioOutputs: [CallAudioOutput] = [CallAudioOutput(kind: .bluetooth, id: "airpods", name: "AirPods Pro"),
+                                                                .receiver,
+                                                                .speaker]
+    
+    public static func noCall() -> MatrixRTCMediaSession? {
         nil
     }
 }

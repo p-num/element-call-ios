@@ -12,27 +12,25 @@ import Foundation
 import MatrixRustSDK
 import Testing
 
-/// The parts of the transport adapter that survive the widget-driver stopgap: how bridge failures are
-/// classified for the core, and the session-long to-device relay.
+/// The parts of the transport adapter that survive the widget-driver stopgap: how bridge failures
+/// reach the core, and the session-long to-device relay.
 ///
 /// Serialized for the same reason as `WidgetMatrixBridgeTests`: real deadlines, and parallel
 /// execution on a hosted runner starves them.
 @Suite(.timeLimit(.minutes(1)), .serialized)
 nonisolated struct MatrixRTCTransportAdapterTests {
+    /// The core decides which refusals retire a feature, so a refusal reaches it with the
+    /// homeserver's own words rather than a verdict made here.
     @Test
-    func permanentRefusalsRetireTheFeature() {
+    func homeserverRefusalsCarryTheirErrcodeAndStatus() {
         #expect(MatrixRTCRoomBridgeError.matrixAPI(errcode: "M_UNRECOGNIZED", httpStatus: 404, message: "Unrecognized request").transportError
-            == .notSupported("Unrecognized request"))
+            == .failed("Unrecognized request", errcode: "M_UNRECOGNIZED", httpStatus: 404))
         #expect(MatrixRTCRoomBridgeError.matrixAPI(errcode: "M_FORBIDDEN", httpStatus: 403, message: "Sending delayed events has been disallowed").transportError
-            == .notSupported("Sending delayed events has been disallowed"))
+            == .failed("Sending delayed events has been disallowed", errcode: "M_FORBIDDEN", httpStatus: 403))
     }
     
     @Test
-    func everythingElseIsRetried() {
-        #expect(MatrixRTCRoomBridgeError.matrixAPI(errcode: "M_FORBIDDEN", httpStatus: 403, message: "You don't have permission").transportError
-            == .failed("You don't have permission"))
-        #expect(MatrixRTCRoomBridgeError.matrixAPI(errcode: "M_LIMIT_EXCEEDED", httpStatus: 429, message: "Too many requests").transportError
-            == .failed("Too many requests"))
+    func bridgeFailuresCarryNoErrcode() {
         #expect(MatrixRTCRoomBridgeError.timedOut.transportError == .failed("timedOut"))
         #expect(MatrixRTCRoomBridgeError.notRunning.transportError == .failed("notRunning"))
     }

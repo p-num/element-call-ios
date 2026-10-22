@@ -29,11 +29,13 @@ import Synchronization
 final class TestPatternVideo: Sendable {
     private struct Attachment {
         let slot: VideoFrameSlot
-        let size: CGSize
+        let memberID: String
     }
     
     private struct State {
         var attachments: [UUID: Attachment] = [:]
+        /// The stage's shape, which our own camera's picture follows.
+        var isLandscape = false
         /// The last frame made at each width, so a slot that mounts is handed one at once, without
         /// making another picture on the thread that is mounting it.
         var latest: [Int: MatrixRTCVideoFrame] = [:]
@@ -46,6 +48,11 @@ final class TestPatternVideo: Sendable {
     
     /// Landscape unless the member is one of these, so both shapes are on the stage at once.
     private static let portraitMembers = ["@bob:example.com:DEVICE", "@erin:example.com:DEVICE"]
+    /// Ourselves, Alice in every fixture. Our picture is upright in the interface orientation, as a
+    /// real front camera's is, so it is portrait on an upright phone and landscape on its side: the
+    /// floating tile takes that shape (019 R10, R29), and with a fixed shape the harness only ever
+    /// showed one of them.
+    private static let ownMemberID = "@alice:example.com:DEVICE"
     /// Deliberately modest. In a real call every tile is sent a layer that suits the size it is
     /// drawn at, so a strip cell a couple of hundred points wide never receives 720p; handing every
     /// tile a full-size frame is both far more work than the real thing and less like it. Nothing
@@ -62,11 +69,22 @@ final class TestPatternVideo: Sendable {
         })
     }
     
+    /// The stage turned. Our own picture changes shape on the next frame, as a camera's does.
+    func setLandscape(_ isLandscape: Bool) {
+        state.withLock { $0.isLandscape = isLandscape }
+    }
+    
+    private static func size(for memberID: String, isLandscape: Bool) -> CGSize {
+        if memberID == ownMemberID {
+            return isLandscape ? landscape : portrait
+        }
+        return portraitMembers.contains(memberID) ? portrait : landscape
+    }
+    
     private func attach(_ slot: VideoFrameSlot, memberID: String) {
-        let size = Self.portraitMembers.contains(memberID) ? Self.portrait : Self.landscape
         let latest = state.withLock { state in
-            state.attachments[slot.id] = Attachment(slot: slot, size: size)
-            return state.latest[Int(size.width)]
+            state.attachments[slot.id] = Attachment(slot: slot, memberID: memberID)
+            return state.latest[Int(Self.size(for: memberID, isLandscape: state.isLandscape).width)]
         }
         // The first frame goes in straight away: a slot mounted mid-animation would otherwise show
         // its avatar until the next tick, which is the very stutter this is here to look for.
@@ -92,19 +110,20 @@ final class TestPatternVideo: Sendable {
     /// immutable reference types, so sharing one is just a retain, where generating six identical
     /// pictures was six times the work for the same result.
     private func tick(advancing: Bool) {
-        let (attachments, phase) = state.withLock { state in
+        let (attachments, phase, isLandscape) = state.withLock { state in
             if advancing {
                 state.phase += 8
             }
-            return (Array(state.attachments.values), state.phase)
+            return (Array(state.attachments.values), state.phase, state.isLandscape)
         }
         // Keyed by width, which is enough to tell the two sizes apart and saves making CGSize
         // hashable from outside the module that owns it.
         var generated: [Int: MatrixRTCVideoFrame] = [:]
         for attachment in attachments {
-            let width = Int(attachment.size.width)
+            let size = Self.size(for: attachment.memberID, isLandscape: isLandscape)
+            let width = Int(size.width)
             let frame = generated[width] ?? MatrixRTCTestPattern.frame(width: width,
-                                                                       height: Int(attachment.size.height),
+                                                                       height: Int(size.height),
                                                                        phase: phase)
             generated[width] = frame
             attachment.slot.offer(frame)

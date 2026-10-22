@@ -42,9 +42,17 @@ public final class ElementCallScreenContext {
         }
     }
     
+    /// The corner our own floating tile is in (019 R18, R20). A way of looking, like the tile full
+    /// screen, so it lives here rather than in `viewState`: it outlives rotation, the grid and
+    /// minimizing, and only the end of the call puts it back.
+    public var ownTileCorner: ElementCallOwnTileCorner = .bottomRight
+    
     /// Whether the full-screen chrome is up. Down to begin with, so entering full screen is the
     /// picture and nothing else, and a single tap brings the controls back.
     public var isFullscreenChromeVisible = false
+    /// Whether the stage's own chrome is up, and why not (spec 017). Here for the reason the flag
+    /// above is: a preview and the harness can construct the context, and nothing else.
+    var stageChrome = ElementCallChromeVisibility()
     /// Asks the stage to scroll to an offset, in points from the top of the content. For a harness
     /// playing a scenario's `scroll` frames; a host never needs it. Each request carries its own
     /// identity, so asking for the same offset twice scrolls twice.
@@ -64,7 +72,7 @@ public final class ElementCallScreenContext {
     /// Builds a context around a state written by hand, with nothing behind it.
     ///
     /// This is the seam that makes a connected call renderable without one. The live view model
-    /// needs a `MatrixRTCCall` to produce tiles, and that class wraps handles from the Rust core and
+    /// needs a `MatrixRTCMediaSession` to produce tiles, and that class wraps handles from the Rust core and
     /// cannot be constructed in a test. The view state it projects into is a plain struct, so a
     /// preview skips the projection and writes the answer. Tiles claiming video draw their avatar,
     /// because there is no call to pull frames from, which is what a snapshot wants anyway.
@@ -117,7 +125,16 @@ public final class ElementCallScreenContext {
             case .toggleScreenShare:
                 context.viewState.isScreenSharing.toggle()
             case .toggleLoudspeaker:
-                context.viewState.isLoudspeaker.toggle()
+                let state = context.viewState
+                context.viewState.audioOutput = state.isLoudspeaker ? state.audioOutputs.first { $0.kind != .speaker } ?? .receiver : .speaker
+            case let .selectAudioOutput(output):
+                context.viewState.audioOutput = output
+            case .toggleRaisedHand:
+                let isRaised = !context.viewState.isHandRaised
+                context.viewState.isHandRaised = isRaised
+                // Queued after every remote hand, as the harness numbers hands (009 C7).
+                let position = isRaised ? 1 + context.viewState.tiles.count { !$0.isLocal && $0.hasHandRaised } : nil
+                context.viewState.tiles = ElementCallScreenViewState.showingHands(context.viewState.tiles.map { $0.withHandPosition(position) })
             case .minimize, .hangUp, .dismiss:
                 onHostAction?(action)
             }
@@ -159,7 +176,7 @@ public final class ElementCallScreenViewModel {
     public let context: ElementCallScreenContext
     
     /// The call whose frames the tiles draw; nil until media is connected.
-    public var call: MatrixRTCCall? {
+    public var call: MatrixRTCMediaSession? {
         controller.call
     }
     
@@ -195,6 +212,7 @@ public final class ElementCallScreenViewModel {
         // would be missing from that first frame.
         context.viewState.isDeveloperModeEnabled = controller.options.isDeveloperModeEnabled
         context.viewState.isScreenSharingEnabled = controller.options.isScreenSharingEnabled
+        context.viewState.canSwitchCamera = MatrixRTCMediaSession.canSwitchCamera
         
         if let room {
             room.displayNamePublisher
@@ -233,6 +251,10 @@ public final class ElementCallScreenViewModel {
             controller.setScreenShareEnabled(!(controller.call?.isScreenSharing ?? false))
         case .toggleLoudspeaker:
             controller.setLoudspeaker(!controller.isLoudspeaker)
+        case let .selectAudioOutput(output):
+            controller.selectAudioOutput(output)
+        case .toggleRaisedHand:
+            controller.setHandRaised(!controller.isHandRaised)
         case .toggleTileStats:
             controller.toggleTileStats()
         case .minimize:
@@ -267,14 +289,19 @@ public final class ElementCallScreenViewModel {
         var state = context.viewState
         state.connection = controller.connection
         state.connectedAt = controller.connectedAt
-        state.isLoudspeaker = controller.isLoudspeaker
+        state.audioOutputs = controller.audioOutputs
+        state.audioOutput = controller.audioOutput
         state.isTileStatsVisible = controller.isTileStatsVisible
         state.isMaximized = controller.isMaximized
-        state.memberCount = controller.session?.memberCount ?? 0
+        state.memberCount = controller.rtcCall?.memberCount ?? 0
         // Above the guard below: these two are the only controls that mean anything before there is
         // a call, and without them a mute tapped while joining draws itself back unmuted.
         state.isMicrophoneMuted = controller.isMicrophoneMuted
         state.isCameraEnabled = controller.isCameraEnabled
+        // The membership comes before media, so the hand is offered from the join on.
+        state.isHandRaiseAvailable = controller.rtcCall != nil
+        state.isHandPending = controller.isHandPending
+        state.isHandRaised = controller.isHandRaised
         
         if let message = controller.errorMessage {
             context.alertInfo = ElementCallAlert(title: context.style.strings.error, message: message)
@@ -284,6 +311,13 @@ public final class ElementCallScreenViewModel {
         guard let call = controller.call else {
             state.tiles = []
             state.spotlightID = nil
+            // So the next call on a reused view model starts its speaker afresh.
+            state.smallCallSpeakerID = nil
+            // Only on a change: Observation notifies on every set, and this runs on every wake
+            // while there is no call.
+            if context.ownTileCorner != .bottomRight {
+                context.ownTileCorner = .bottomRight
+            }
             lastSpeakerID = nil
             controller.setSpotlightTile(nil)
             publish(state)
@@ -296,6 +330,8 @@ public final class ElementCallScreenViewModel {
             return
         }
         
+        // A small call is laid out in join order, which the core gives below this (019 R7).
+        call.setRankingThreshold(ElementCallSmallCallLayout.rankingThreshold)
         state.isFrontCamera = call.isFrontCamera
         state.isScreenSharing = call.isScreenSharing
         state.isMediaDegraded = call.isMediaDegraded
@@ -311,6 +347,9 @@ public final class ElementCallScreenViewModel {
                                  // `receiveStats` is rewritten every second whether anyone is looking
                                  // or not, so tracking it cost a full screen rebuild per second.
                                  stats: controller.isTileStatsVisible ? { Self.stats(for: $0, in: call) } : { _ in nil })
+        // Here rather than in the tile, which cannot tell a one-to-one call's floating tile from a
+        // small call's, and which would miss the full-screen badge drawn by the screen (009 R33).
+        state.tiles = ElementCallScreenViewState.showingHands(state.tiles)
         
         let spotlight = ElementCallSpotlight.choose(tiles: state.tiles,
                                                     shownHeroID: context.shownHeroID,
@@ -321,6 +360,8 @@ public final class ElementCallScreenViewModel {
         } else {
             nil
         }
+        // The speaker carried over from the last refresh is the one the rule holds.
+        state.smallCallSpeakerID = ElementCallSmallCallLayout.speaker(tiles: state.tiles, held: state.smallCallSpeakerID)
         // The user's pick is followed by identity for as long as it is a hero; the moment the
         // choice lands elsewhere it is stale, and keeping it would bring that hero straight back
         // to the front if it ever returned.
@@ -329,7 +370,8 @@ public final class ElementCallScreenViewModel {
         }
         // The window continues what the stage shows, so the controller learns it from here rather
         // than deriving its own answer from the ranking; the setter declines an equal value.
-        controller.setSpotlightTile(spotlight.tileID)
+        let pictureInPicture = state.pictureInPictureTile
+        controller.setSpotlightTile(pictureInPicture.id, isExact: pictureInPicture.isExact)
         
         publish(state)
     }
@@ -386,7 +428,7 @@ public final class ElementCallScreenViewModel {
                                    isMicrophoneMuted: false,
                                    hasVideo: false,
                                    isSpeaking: false,
-                                   hasHandRaised: false,
+                                   handPosition: nil,
                                    isHero: ref.isHero,
                                    stats: nil)
         }
@@ -400,7 +442,7 @@ public final class ElementCallScreenViewModel {
                                    isMicrophoneMuted: tile.isMicrophoneMuted,
                                    hasVideo: tile.hasVideo,
                                    isSpeaking: tile.isSpeaking,
-                                   hasHandRaised: tile.handRaisedAt != nil,
+                                   handPosition: tile.handRaisedPosition,
                                    // Ours is never a hero even if something upstream said so: it is
                                    // not in the ranking, so nothing can rank it.
                                    isHero: tile.isLocal ? false : tile.isHero,
@@ -412,7 +454,7 @@ public final class ElementCallScreenViewModel {
     }
     
     /// The stats overlay's text for one tile, from everything the call knows about that stream.
-    private static func stats(for tile: MatrixRTCTile, in call: MatrixRTCCall) -> String? {
+    private static func stats(for tile: MatrixRTCTile, in call: MatrixRTCMediaSession) -> String? {
         describe(call.receiveStats[MatrixRTCStreamRef(tile.id)],
                  audio: tile.kind == .screenShare ? nil : call.receiveStats[MatrixRTCStreamRef(memberID: tile.memberID, kind: .microphone)],
                  kind: tile.kind,
