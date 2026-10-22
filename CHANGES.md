@@ -11,6 +11,10 @@ version will actually read it.
 
 ## Unreleased
 
+- Hosts switching calls must check `controller.lastDeparture` for the expected room and a
+  `.confirmed` result. `.ended` still means local teardown. `MatrixRTCCall.leave()` now returns
+  its original departure result to concurrent/repeated callers, including a retained failure.
+
 **`ElementCallActiveSpeakerGradient` is now `ElementCallBorderGradient.activeSpeaker`**, beside
 `.raisedHand`. A host theme that draws its own speaking ring can do the same for a raised hand by
 implementing `raisedHandBorder(in:)`; the default is design's.
