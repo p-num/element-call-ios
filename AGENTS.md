@@ -76,6 +76,9 @@ Three flags are not optional, and each fails in a way that does not name its own
 
 `swift build` alone will fail: the package is iOS-only. Always go through `xcodebuild`.
 
+`Tests` also compiles Release with Xcode 26.6, after the pinned-toolchain tests. The host archives
+with that toolchain; a Debug package test cannot catch its resource-accessor isolation errors.
+
 **Lint before every commit, the way CI does, and in this order:**
 
 ```bash

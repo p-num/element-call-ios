@@ -125,26 +125,36 @@ final nonisolated class CallSoundEffectRenderer: @unchecked Sendable {
 nonisolated extension CallSoundEffectRenderer {
     /// A renderer over the bundled files, or nil if they could not be decoded, which is logged: a
     /// call without its join sound is still a call.
-    static func bundled() -> CallSoundEffectRenderer? {
-        guard let samples = bundledSamples else { return nil }
+    static func bundled() async -> CallSoundEffectRenderer? {
+        guard let samples = await bundledSamples.value else { return nil }
         return CallSoundEffectRenderer(join: samples.join, leave: samples.leave, raiseHand: samples.raiseHand)
     }
     
     /// Decoded once per process, on first use, and shared by every call after it.
-    private static let bundledSamples: (join: [Float], leave: [Float], raiseHand: [Float])? = {
+    private static let bundledSamples: Task<(join: [Float], leave: [Float], raiseHand: [Float])?, Never> = .detached(priority: .utility) {
         do {
-            return try (decode(resource: "join_call"), decode(resource: "left_call"), decode(resource: "raise_hand"))
+            // SwiftPM's generated Bundle.module belongs to the main actor; decoding does not.
+            let urls = try await MainActor.run {
+                try (resourceURL("join_call"), resourceURL("left_call"), resourceURL("raise_hand"))
+            }
+            return try (decode(url: urls.0), decode(url: urls.1), decode(url: urls.2))
         } catch {
             MatrixRTCLog.error("Failed to decode the call sounds: \(error)")
             return nil
         }
-    }()
+    }
     
+    @MainActor
     static func decode(resource: String) throws -> [Float] {
+        try decode(url: resourceURL(resource))
+    }
+    
+    @MainActor
+    private static func resourceURL(_ resource: String) throws -> URL {
         guard let url = Bundle.module.url(forResource: resource, withExtension: "mp3", subdirectory: "Sounds") else {
             throw MatrixRTCError.media("\(resource).mp3 is not in the bundle")
         }
-        return try decode(url: url)
+        return url
     }
     
     /// To the engine's mono Float32: the channels averaged, then resampled to the engine's 48 kHz if

@@ -92,9 +92,17 @@ nonisolated struct CallSoundEffectRendererTests {
         #expect(matches(render(renderer, frames: 1), [0.1]))
     }
     
+    @Test
+    func bundledRendererCanLoadFromABackgroundTask() async throws {
+        let renderer = try #require(await Task.detached { await CallSoundEffectRenderer.bundled() }.value)
+        renderer.play(.join)
+        #expect(render(renderer, frames: 48000).contains { $0 != 0 })
+    }
+    
     /// The files have to be in the bundle and decodable, or the first anyone hears of it is a silent
     /// call on a device.
     @Test(arguments: ["join_call", "left_call"])
+    @MainActor
     func theBundledSoundsDecode(resource: String) throws {
         let samples = try CallSoundEffectRenderer.decode(resource: resource)
         // Web's files are 0.936 s at 48 kHz; the decoder's priming trim may shave a frame or two.
@@ -106,6 +114,7 @@ nonisolated struct CallSoundEffectRendererTests {
     /// Web's file is 24 kHz and 0.648 s; at the engine's 48 kHz that is about 31,100 frames. Left at
     /// its own rate it would play an octave up in half the time.
     @Test
+    @MainActor
     func theRaisedHandIsResampledToTheEnginesRate() throws {
         let samples = try CallSoundEffectRenderer.decode(resource: "raise_hand")
         #expect(abs(samples.count - 31104) < 2048)
