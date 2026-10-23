@@ -892,7 +892,7 @@ public final class MatrixRTCMediaSession {
     
     /// Decoded off this actor: it is file IO and a decode, at the moment the call is connecting.
     private func installSoundEffects() async {
-        let renderer = await Task.detached(priority: .utility) { CallSoundEffectRenderer.bundled() }.value
+        let renderer = await CallSoundEffectRenderer.bundled()
         guard let renderer, !Task.isCancelled else { return }
         soundEffectRenderer = renderer
         audioEngine.setSoundEffectSource(render: renderer.renderBlock)
