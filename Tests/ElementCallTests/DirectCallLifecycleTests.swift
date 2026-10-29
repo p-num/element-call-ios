@@ -140,6 +140,8 @@ struct DirectCallLifecycleTests {
     func initialCameraFailureIsVisibleAndKeepsAudioConnected() async {
         let controller = ElementCallController.fake(connection: .connected)
         let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: FakeMediaSession())
+        controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
+                                   room: ElementCallFakeRoom(), connection: .connected, call: media)
         await controller.applyCameraEnabled(true, on: media)
         #expect(controller.errorMessage?.contains("camera could not start") == true)
         #expect(controller.connection == .connected)

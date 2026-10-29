@@ -18,12 +18,28 @@ import Synchronization
 /// engine is running.
 final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
     private let state = Mutex(State())
+    private let events: AsyncStream<FfiCallEvent>
+    private let eventsContinuation: AsyncStream<FfiCallEvent>.Continuation
+    private let heldPublishKind: FfiStreamKind?
+    
+    init(holdingPublish kind: FfiStreamKind? = nil) {
+        (events, eventsContinuation) = AsyncStream.makeStream()
+        heldPublishKind = kind
+    }
+    
+    func send(_ event: FfiCallEvent) {
+        eventsContinuation.yield(event)
+    }
     
     private struct State {
         var published: [FfiPublishOptions] = []
         var localMutes: [(kind: FfiStreamKind, muted: Bool)] = []
+        var appliedLocalMutes: [(kind: FfiStreamKind, muted: Bool)] = []
+        var heldMute: (kind: FfiStreamKind, muted: Bool)?
+        var pendingMute: CheckedContinuation<Void, Never>?
         var detailWindows: [(offset: UInt32, len: UInt32, also: [FfiTileId])] = []
         var constraints: [(stream: FfiStreamRef, constraints: FfiMediaConstraints)] = []
+        var pendingPublish: CheckedContinuation<Void, Error>?
     }
     
     var published: [FfiPublishOptions] {
@@ -43,13 +59,65 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         state.withLock { $0.localMutes }
     }
     
+    var appliedLocalMutes: [(kind: FfiStreamKind, muted: Bool)] {
+        state.withLock { $0.appliedLocalMutes }
+    }
+    
+    var hasPendingMute: Bool {
+        state.withLock { $0.pendingMute != nil }
+    }
+    
+    func holdNextMute(kind: FfiStreamKind, muted: Bool) {
+        state.withLock { $0.heldMute = (kind, muted) }
+    }
+    
+    func answerMute() {
+        let pending = state.withLock { state in
+            defer { state.pendingMute = nil }
+            return state.pendingMute
+        }
+        pending?.resume()
+    }
+    
+    var hasPendingPublish: Bool {
+        state.withLock { $0.pendingPublish != nil }
+    }
+    
+    func answerPublish(failingWith error: Error? = nil) {
+        let pending = state.withLock { state in
+            defer { state.pendingPublish = nil }
+            return state.pendingPublish
+        }
+        if let error {
+            pending?.resume(throwing: error)
+        } else {
+            pending?.resume()
+        }
+    }
+    
     func publish(options: FfiPublishOptions) async throws -> FfiLocalTrack {
         state.withLock { $0.published.append(options) }
+        if options.kind == heldPublishKind {
+            try await withCheckedThrowingContinuation { continuation in
+                state.withLock { $0.pendingPublish = continuation }
+            }
+        }
         return FfiLocalTrack(noPointer: .init())
     }
     
     func setLocalMuted(kind: FfiStreamKind, muted: Bool) async throws {
-        state.withLock { $0.localMutes.append((kind, muted)) }
+        let hold = state.withLock { state in
+            state.localMutes.append((kind, muted))
+            guard let held = state.heldMute, held.kind == kind, held.muted == muted else { return false }
+            state.heldMute = nil
+            return true
+        }
+        if hold {
+            await withCheckedContinuation { continuation in
+                state.withLock { $0.pendingMute = continuation }
+            }
+        }
+        state.withLock { $0.appliedLocalMutes.append((kind, muted)) }
     }
     
     // MARK: - Inert
@@ -58,15 +126,18 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         nil
     }
     
-    func disconnect() async throws { }
+    func disconnect() async throws {
+        eventsContinuation.finish()
+    }
+    
     func localIdentity() -> String {
         "@fake:example.org"
     }
     
-    /// Never returns, so the call's event pump parks rather than spinning.
+    /// Waits for an explicitly injected event, rather than spinning on an empty queue.
     func nextEvent() async -> FfiCallEvent? {
-        try? await Task.sleep(for: .seconds(3600))
-        return nil
+        var iterator = events.makeAsyncIterator()
+        return await iterator.next()
     }
     
     /// Parks like `nextEvent()`, for the same reason.

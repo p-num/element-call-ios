@@ -165,6 +165,15 @@ nonisolated struct MatrixRTCBackendTests {
         backend.unregister(roomID: "!later")
         #expect(try await backend.rtcTransports() == room.transports)
     }
+    
+    @Test
+    func cleaningAnOldRoomCannotUnregisterItsReplacementWithTheSameID() async throws {
+        let backend = makeBackend()
+        let replacement = RecordingRoom(roomID: room.roomID, transports: #"[{"type":"livekit","livekit_service_url":"https://replacement.example.org"}]"#)
+        backend.register(replacement)
+        backend.unregister(roomID: room.roomID, matching: room)
+        #expect(try await backend.rtcTransports() == replacement.transports)
+    }
 }
 
 // MARK: - Fakes

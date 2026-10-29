@@ -138,6 +138,9 @@ public final class MatrixRTCMediaSession {
     private var microphoneTrack: FfiLocalTrack?
     private let localVideoMeter = VideoFrameMeter()
     private var cameraTrack: FfiLocalTrack?
+    private var cameraPublication: (id: UUID, task: Task<FfiLocalTrack, any Error>)?
+    private var cameraRequestID = UUID()
+    private var requestedCameraEnabled = false
     private var playbackSinks = [String: AudioPlaybackSink]()
     private var membersWithoutMicrophone = Set<String>()
     private var videoSources = [MatrixRTCStreamRef: RemoteVideoSource]()
@@ -281,6 +284,9 @@ public final class MatrixRTCMediaSession {
     /// published live for the moment between the track reaching the transport and the mute doing so.
     public func publishMicrophone(muted: Bool = false) async throws {
         guard microphoneTrack == nil else { return }
+        guard !hasEnded, !Task.isCancelled else { throw CancellationError() }
+        isMicrophoneMuted = muted
+        microphone.setMuted(muted)
         let track: FfiLocalTrack
         do {
             track = try await mediaSession.publish(options: FfiPublishOptions(kind: .microphone,
@@ -292,11 +298,13 @@ public final class MatrixRTCMediaSession {
         } catch {
             throw MatrixRTCError.media("Failed to publish the microphone: \(error)")
         }
+        guard !hasEnded, !Task.isCancelled else { throw CancellationError() }
         microphoneTrack = track
+        // Controls remain live while publication is in flight. Close the capture gate before
+        // starting it and reconcile the latest choice, rather than restoring the join-time value.
+        microphone.setMuted(isMicrophoneMuted)
         microphone.start(track: track)
-        // The transport already knows, from the publish. This is what closes the capturer's own gate
-        // and records the state.
-        await setMicrophoneMuted(muted)
+        await setMicrophoneMuted(isMicrophoneMuted)
         MatrixRTCLog.info("Publishing microphone as \(localMemberID)")
     }
     
@@ -305,36 +313,29 @@ public final class MatrixRTCMediaSession {
     public func setMicrophoneMuted(_ muted: Bool) async {
         isMicrophoneMuted = muted
         microphone.setMuted(muted)
-        await setTransportMuted(.microphone, muted: muted)
+        var appliedMute: Bool
+        repeat {
+            appliedMute = isMicrophoneMuted
+            await setTransportMuted(.microphone, muted: appliedMute)
+        } while appliedMute != isMicrophoneMuted
     }
     
     // MARK: - Camera
     
-    /// On: start capture, then unmute the transport. Off: **mute the transport first**, then release
-    /// the device (a peer told afterwards has already been shown a frozen picture).
+    /// On: publish muted, start capture, then unmute. Off closes capture immediately and reconciles
+    /// the transport, including an enable operation that has not finished yet.
     public func setCameraEnabled(_ enabled: Bool) async throws {
-        guard isCameraEnabled != enabled else { return }
+        requestedCameraEnabled = enabled
+        if enabled, isCameraEnabled {
+            return
+        }
+        cameraRequestID = UUID()
+        let requestID = cameraRequestID
         if enabled {
-            let track: FfiLocalTrack
-            if let cameraTrack {
-                track = cameraTrack
-            } else {
-                do {
-                    // simulcast is not a quality setting: with one layer dynacast pauses the only
-                    // encoding nobody's small tile asked for and no video leaves the device.
-                    // The size is the one the frames will have, since the layers are derived from it.
-                    let size = capturesCamera ? camera.publishedSize : CameraCaptureFormat.fallbackOutput
-                    track = try await mediaSession.publish(options: FfiPublishOptions(kind: .camera,
-                                                                                      audio: nil,
-                                                                                      video: FfiVideoSourceConfig(width: UInt32(size.width),
-                                                                                                                  height: UInt32(size.height)),
-                                                                                      simulcast: true,
-                                                                                      muted: true))
-                } catch {
-                    throw MatrixRTCError.media("Failed to publish the camera: \(error)")
-                }
-                cameraTrack = track
-            }
+            guard !hasEnded, !Task.isCancelled else { throw CancellationError() }
+            let track = try await publishedCameraTrack()
+            guard !hasEnded, !Task.isCancelled else { throw CancellationError() }
+            guard requestID == cameraRequestID, requestedCameraEnabled else { return }
             if capturesCamera {
                 camera.setInterfaceOrientation(currentInterfaceOrientation)
                 do {
@@ -345,15 +346,75 @@ public final class MatrixRTCMediaSession {
                 }
                 isFrontCamera = camera.isFrontFacing
             }
-            await setTransportMuted(.camera, muted: false)
+            isCameraEnabled = true
+            await reconcileCameraMute()
+            if hasEnded || Task.isCancelled {
+                // A cancelled old operation must not undo a newer camera request.
+                if cameraRequestID == requestID {
+                    requestedCameraEnabled = false
+                    cameraRequestID = UUID()
+                    isCameraEnabled = false
+                    if capturesCamera {
+                        camera.stop()
+                    }
+                }
+                await reconcileCameraMute()
+                throw CancellationError()
+            }
         } else {
-            await setTransportMuted(.camera, muted: true)
+            // Stop handing frames over immediately, even if a publication/unmute is still awaiting
+            // the transport. Its completion reads this latest intent before starting capture.
+            isCameraEnabled = false
             if capturesCamera {
                 camera.stop()
             }
+            await reconcileCameraMute()
         }
-        isCameraEnabled = enabled
-        MatrixRTCLog.info("Camera \(enabled ? "enabled" : "disabled") for \(localMemberID)")
+        MatrixRTCLog.info("Camera \(isCameraEnabled ? "enabled" : "disabled") for \(localMemberID)")
+    }
+    
+    /// Concurrent enable requests share one muted publication. A later off request can keep the
+    /// track for a retry without ever starting capture or advertising it as unmuted.
+    private func publishedCameraTrack() async throws -> FfiLocalTrack {
+        if let cameraTrack {
+            return cameraTrack
+        }
+        let publication: (id: UUID, task: Task<FfiLocalTrack, any Error>)
+        if let pending = cameraPublication {
+            publication = pending
+        } else {
+            let size = capturesCamera ? camera.publishedSize : CameraCaptureFormat.fallbackOutput
+            // A single simulcast layer lets dynacast pause the only encoding, leaving no video.
+            let options = FfiPublishOptions(kind: .camera, audio: nil,
+                                            video: FfiVideoSourceConfig(width: UInt32(size.width), height: UInt32(size.height)),
+                                            simulcast: true, muted: true)
+            publication = (UUID(), Task { [mediaSession] in try await mediaSession.publish(options: options) })
+            cameraPublication = publication
+        }
+        defer {
+            if cameraPublication?.id == publication.id {
+                cameraPublication = nil
+            }
+        }
+        let track: FfiLocalTrack
+        do {
+            track = try await publication.task.value
+        } catch {
+            throw MatrixRTCError.media("Failed to publish the camera: \(error)")
+        }
+        guard !hasEnded else { throw CancellationError() }
+        cameraTrack = track
+        return track
+    }
+    
+    /// A mute acknowledgement can arrive after a newer toggle. Reconcile again in that case so
+    /// the final transport state agrees with the capture state, including interruptions.
+    private func reconcileCameraMute() async {
+        var requestID: UUID
+        repeat {
+            requestID = cameraRequestID
+            await setTransportMuted(.camera, muted: !isCameraEnabled || isCameraInterrupted || hasEnded)
+        } while requestID != cameraRequestID
     }
     
     /// Whether the device has both a front and a back camera. Without them ``switchCamera()`` falls
@@ -440,11 +501,12 @@ public final class MatrixRTCMediaSession {
         return tiles.order.first?.id.memberID
     }
     
-    private func handleCameraInterruption(_ interrupted: Bool) async {
+    func handleCameraInterruption(_ interrupted: Bool) async {
         guard isCameraEnabled, isCameraInterrupted != interrupted else { return }
         isCameraInterrupted = interrupted
+        cameraRequestID = UUID()
         // The user's camera choice stays what it was; only the transport state follows the interruption.
-        await setTransportMuted(.camera, muted: interrupted)
+        await reconcileCameraMute()
     }
     
     public func updateInterfaceOrientation(_ orientation: UIInterfaceOrientation) {
@@ -779,6 +841,11 @@ public final class MatrixRTCMediaSession {
     // MARK: - Teardown
     
     public func disconnect() async {
+        hasEnded = true
+        requestedCameraEnabled = false
+        cameraRequestID = UUID()
+        isCameraEnabled = false
+        cameraPublication?.task.cancel()
         // First: everything below tears the call down, and none of it may sound like people leaving.
         joinLeaveSoundPolicy.silence()
         pendingReleases.values.forEach { $0.cancel() }
@@ -856,7 +923,7 @@ public final class MatrixRTCMediaSession {
     
     private func pumpEvents() async {
         while !Task.isCancelled, let ffiEvent = await mediaSession.nextEvent() {
-            let event = MatrixRTCCallEvent(ffiEvent)
+            guard let event = MatrixRTCCallEvent(ffiEvent) else { continue }
             handle(event)
             eventsContinuation.yield(event)
         }

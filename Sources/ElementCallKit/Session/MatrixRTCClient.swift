@@ -41,16 +41,24 @@ public final class MatrixRTCClient {
             MatrixRTCLog.error("The transport could not open \(roomID): \(error)")
             throw MatrixRTCError.transport("\(error)")
         }
+        guard !Task.isCancelled else {
+            await matrixRoom.close()
+            throw CancellationError()
+        }
         // Before the core asks for anything: it subscribes from inside `room`.
         backend.register(matrixRoom)
         
         MatrixRTCLog.info("Opening \(roomID) in format \(format)")
         do {
             let rtcRoom = try await seededRoom(roomID: roomID, format: format)
+            guard !Task.isCancelled else {
+                await rtcRoom.shutdown()
+                throw CancellationError()
+            }
             MatrixRTCLog.info("\(roomID) is ready")
             return MatrixRTCRoom(rtcRoom: rtcRoom, matrixRoom: matrixRoom, backend: backend)
         } catch {
-            backend.unregister(roomID: roomID)
+            backend.unregister(roomID: roomID, matching: matrixRoom)
             await matrixRoom.close()
             throw error
         }
@@ -151,7 +159,7 @@ public final class MatrixRTCRoom {
         await rtcRoom.shutdown()
         call?.stop()
         call = nil
-        backend.unregister(roomID: roomID)
+        backend.unregister(roomID: roomID, matching: matrixRoom)
         await matrixRoom.close()
         MatrixRTCLog.info("Shut \(roomID) down")
     }

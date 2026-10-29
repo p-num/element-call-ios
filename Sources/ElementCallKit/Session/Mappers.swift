@@ -159,7 +159,7 @@ nonisolated extension MatrixRTCFrameEncryptionState {
 }
 
 nonisolated extension MatrixRTCCallEvent {
-    init(_ event: FfiCallEvent) {
+    init?(_ event: FfiCallEvent) {
         switch event {
         case .participantJoined(let memberId, let userId, let participantCount):
             self = .participantJoined(memberID: memberId, userID: userId, participantCount: Int(participantCount))
@@ -188,8 +188,8 @@ nonisolated extension MatrixRTCCallEvent {
             self = .reaction(memberID: memberId, emoji: emoji, name: name)
         case .unknownParticipant(let identity):
             // Not surfaced: the transport knows an identity the membership projection doesn't (yet).
-            self = .mediaConnectionDegraded(false)
             MatrixRTCLog.debug("Unknown participant on the transport: \(identity)")
+            return nil
         case .mediaConnectionState(let degraded):
             self = .mediaConnectionDegraded(degraded)
         case .ended(let reason):
