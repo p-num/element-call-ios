@@ -131,6 +131,11 @@ public nonisolated struct ElementCallStrings: Sendable {
     public var speaker: String
     public var phone: String
     public var headphones: String
+    /// Setup failures shown to the user; underlying service and media errors stay in diagnostics.
+    public var callPreparationFailed: String
+    public var callJoinFailed: String
+    public var callMediaFailed: String
+    public var microphoneStartFailed: String
     
     public init(you: String = "You",
                 error: String = "Error",
@@ -138,7 +143,11 @@ public nonisolated struct ElementCallStrings: Sendable {
                 back: String = "Back",
                 speaker: String = "Speaker",
                 phone: String = "Phone",
-                headphones: String = "Headphones") {
+                headphones: String = "Headphones",
+                callPreparationFailed: String = "This conversation could not be prepared for a call. Please try again.",
+                callJoinFailed: String = "The call could not be joined. Please try again.",
+                callMediaFailed: String = "The call could not connect. Please try again.",
+                microphoneStartFailed: String = "The microphone could not start. Please try again.") {
         self.you = you
         self.error = error
         self.stop = stop
@@ -146,5 +155,9 @@ public nonisolated struct ElementCallStrings: Sendable {
         self.speaker = speaker
         self.phone = phone
         self.headphones = headphones
+        self.callPreparationFailed = callPreparationFailed
+        self.callJoinFailed = callJoinFailed
+        self.callMediaFailed = callMediaFailed
+        self.microphoneStartFailed = microphoneStartFailed
     }
 }
