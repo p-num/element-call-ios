@@ -192,6 +192,8 @@ nonisolated extension MatrixRTCCallEvent {
             return nil
         case .mediaConnectionState(let degraded):
             self = .mediaConnectionDegraded(degraded)
+        case .ownMediaConnectionState(let degraded):
+            self = .ownMediaConnectionDegraded(degraded)
         case .ended(let reason):
             switch reason {
             case .left: self = .ended(.left)

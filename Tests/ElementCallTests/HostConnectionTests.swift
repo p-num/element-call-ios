@@ -318,6 +318,138 @@ struct HostConnectionTests {
         await fixture.media.disconnect()
     }
     
+    @Test
+    func ownRecoveryBeforeMicrophoneReadinessCannotConnectTheHost() async throws {
+        let fixture = Fixture(connection: .connectingMedia)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isOwnMediaDegraded }
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        try await waitUntil { !fixture.media.isOwnMediaDegraded }
+        await drain()
+        #expect(fixture.controller.connection == .connectingMedia)
+        #expect(fixture.controller.connectedAt == nil)
+        #expect(fixture.system.requests.isEmpty)
+        await fixture.media.disconnect()
+    }
+    
+    @Test
+    func initialOwnMediaDegradationDelaysTheFirstConnectionUntilRecovery() async throws {
+        let fixture = Fixture(connection: .connectingMedia, holdingPublish: .microphone)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        let startup = Task {
+            await fixture.controller.publishMedia(on: fixture.media, rtcCall: fixture.rtcCall,
+                                                  room: fixture.room, prepareAudio: { })
+        }
+        defer { fixture.transport.answerPublish() }
+        try await waitUntil { fixture.transport.hasPendingPublish }
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isOwnMediaDegraded }
+        fixture.transport.answerPublish()
+        await startup.value
+        #expect(fixture.controller.connection == .connectingMedia)
+        #expect(fixture.controller.connectedAt == nil)
+        #expect(fixture.system.requests.isEmpty)
+        
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        try await waitUntil { fixture.controller.connection == .connected }
+        #expect(fixture.controller.connectedAt != nil)
+        #expect(fixture.system.requests == [.connected(roomID: fixture.room.roomID)])
+        await fixture.media.disconnect()
+    }
+    
+    @Test
+    func ownMediaReconnectCoalescesReportsAndPreservesTheFirstConnectionTime() async throws {
+        let connectedAt = Date(timeIntervalSince1970: 1234)
+        let fixture = Fixture(connection: .connected, connectedAt: connectedAt)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        // A separate aggregate event is a barrier behind both duplicate own-media events.
+        fixture.transport.send(.mediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isMediaDegraded }
+        await drain()
+        #expect(fixture.controller.connection == .connectingMedia)
+        #expect(fixture.controller.isInCall)
+        #expect(fixture.controller.call === fixture.media)
+        #expect(fixture.controller.connectedAt == connectedAt)
+        #expect(fixture.system.requests == [.disconnected(roomID: fixture.room.roomID)])
+        
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        fixture.transport.send(.mediaConnectionState(degraded: false))
+        try await waitUntil { fixture.controller.connection == .connected && !fixture.media.isMediaDegraded }
+        await drain()
+        #expect(fixture.controller.connectedAt == connectedAt)
+        #expect(fixture.system.requests == [.disconnected(roomID: fixture.room.roomID),
+                                            .connected(roomID: fixture.room.roomID)])
+        await fixture.media.disconnect()
+    }
+    
+    @Test
+    func ownMediaRecoveryRestoresTheHostWhileOnlyRemoteMediaRemainsDegraded() async throws {
+        let connectedAt = Date(timeIntervalSince1970: 1234)
+        let fixture = Fixture(connection: .connected, connectedAt: connectedAt)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        try await waitUntil { fixture.controller.connection == .connectingMedia }
+        fixture.transport.send(.mediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isMediaDegraded }
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        try await waitUntil { fixture.controller.connection == .connected }
+        #expect(!fixture.media.isOwnMediaDegraded)
+        #expect(fixture.media.isMediaDegraded)
+        #expect(fixture.controller.connectedAt == connectedAt)
+        #expect(fixture.system.requests == [.disconnected(roomID: fixture.room.roomID),
+                                            .connected(roomID: fixture.room.roomID)])
+        await fixture.media.disconnect()
+    }
+    
+    @Test
+    func staleOwnMediaEventsCannotReportConnectionForAReplacementInTheSameRoom() async throws {
+        let fixture = Fixture(connection: .connected)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        let replacement = MatrixRTCMediaSession(localMemberID: "replacement", mediaSession: FakeMediaSession(),
+                                                capturesCamera: false)
+        let connectedAt = Date(timeIntervalSince1970: 5678)
+        fixture.controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
+                                           room: fixture.room, connection: .connected,
+                                           connectedAt: connectedAt, call: replacement)
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        fixture.transport.send(.mediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isMediaDegraded }
+        await drain()
+        #expect(fixture.controller.call === replacement)
+        #expect(fixture.controller.connection == .connected)
+        #expect(fixture.controller.connectedAt == connectedAt)
+        #expect(!replacement.isOwnMediaDegraded)
+        #expect(fixture.system.requests.isEmpty)
+        await fixture.media.disconnect()
+        await replacement.disconnect()
+    }
+    
+    @Test(arguments: [ElementCallConnection.idle, .joining, .ended, .failed("failed")])
+    func ownMediaEventsCannotConnectAnUnreadyOrTerminalHost(connection: ElementCallConnection) async throws {
+        let fixture = Fixture(connection: connection)
+        await fixture.media.start()
+        fixture.controller.observeMediaSession(fixture.media)
+        fixture.transport.send(.ownMediaConnectionState(degraded: true))
+        fixture.transport.send(.ownMediaConnectionState(degraded: false))
+        fixture.transport.send(.mediaConnectionState(degraded: true))
+        try await waitUntil { fixture.media.isMediaDegraded }
+        await drain()
+        #expect(fixture.controller.connection == connection)
+        #expect(fixture.controller.connectedAt == nil)
+        #expect(fixture.system.requests.isEmpty)
+        await fixture.media.disconnect()
+    }
+    
     private final class CameraPermission {
         private let replies: AsyncStream<Bool>
         private let continuation: AsyncStream<Bool>.Continuation

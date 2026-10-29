@@ -37,9 +37,15 @@ public protocol ElementCallSystemProvidingProtocol: AnyObject {
     /// incoming-call watcher that sees our own membership first reads it as answered elsewhere.
     func startCall(roomID: String, displayName: String, isVideo: Bool) async
     func reportConnected(roomID: String)
+    /// Our publishing media is reconnecting; keep the same system call alive.
+    func reportDisconnected(roomID: String)
     func endCall(roomID: String)
     /// Mirrors our mute state into the system call UI.
     func setMicrophoneEnabled(_ enabled: Bool, roomID: String)
     
     var events: AnyPublisher<ElementCallSystemEvent, Never> { get }
+}
+
+public extension ElementCallSystemProvidingProtocol {
+    func reportDisconnected(roomID: String) { }
 }

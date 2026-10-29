@@ -17,7 +17,7 @@ public nonisolated enum MatrixRTCLeaveResult: Sendable, Equatable {
 
 /// Our participation in a room's call: membership in, media attached separately.
 ///
-/// You are in the call as soon as ``MatrixRTCRoom/joinCall(notify:)`` returned; media is attached with
+/// You are in the call as soon as ``MatrixRTCRoom/joinCall(intent:notify:)`` returned; media is attached with
 /// ``connectMedia()``. Teardown order matters: disconnect media → leave → shut the room down.
 @MainActor
 @Observable

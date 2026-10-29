@@ -17,7 +17,7 @@ let package = Package(
         .library(name: "ElementCallMatrix", targets: ["ElementCallMatrix"])
     ],
     dependencies: [
-        .package(url: "https://github.com/p-num/matrix-rust-rtc", exact: "0.5.0-rc.4-letro.1"),
+        .package(url: "https://github.com/p-num/matrix-rust-rtc", exact: "0.5.0-rc.4-letro.2"),
         // .package(path: "../matrix-rust-rtc"),
         // The design *tokens*, not the Compound component library. Tokens are static values in
         // their own small package, so depending on them is safe. Compound itself is not, because its
@@ -34,7 +34,7 @@ let package = Package(
         // Share the host's Letro SDK identity and allow the host to advance its pin.
         // The fork preserves upload, room-marker and verification diagnostic APIs.
         .package(url: "https://git.postnumber.com/letro/matrix-rust-components-swift", "26.09.22-letro.1" ..< "100.0.0"),
-        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", exact: "1.19.4")
+        .package(url: "https://github.com/pointfreeco/swift-snapshot-testing", from: "1.19.4")
     ],
     targets: [
         .target(name: "ElementCallKit",

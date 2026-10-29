@@ -125,6 +125,39 @@ struct CameraPublicationTests {
         await call.disconnect()
     }
     
+    @Test(arguments: [true, false])
+    func turningTheCameraOffRetiresItsInterruptionBeforeFreshCapture(recoveryArrivesWhileOff: Bool) async throws {
+        let transport = FakeMediaSession()
+        let call = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
+        try await call.setCameraEnabled(true)
+        await call.handleCameraInterruption(true)
+        try await call.setCameraEnabled(false)
+        #expect(!call.isCameraInterrupted)
+        let acknowledgementsWhileOff = transport.appliedLocalMutes.count
+        
+        if recoveryArrivesWhileOff {
+            await call.handleCameraInterruption(false)
+        }
+        #expect(!call.isCameraEnabled)
+        #expect(!call.isCameraInterrupted)
+        #expect(transport.appliedLocalMutes.last { $0.kind == .camera }?.muted == true)
+        let unmutedWhileOff = transport.appliedLocalMutes.dropFirst(acknowledgementsWhileOff)
+            .contains { $0.kind == .camera && !$0.muted }
+        #expect(!unmutedWhileOff)
+        
+        try await call.setCameraEnabled(true)
+        #expect(call.isCameraEnabled)
+        #expect(!call.isCameraInterrupted)
+        #expect(transport.appliedLocalMutes.last { $0.kind == .camera }?.muted == false)
+        #expect(transport.published.count == 1)
+        
+        await call.handleCameraInterruption(true)
+        #expect(call.isCameraEnabled)
+        #expect(call.isCameraInterrupted)
+        #expect(transport.appliedLocalMutes.last { $0.kind == .camera }?.muted == true)
+        await call.disconnect()
+    }
+    
     #if targetEnvironment(simulator)
     @Test
     func unavailableCameraNeverAdvertisesUnmutedVideoAndCanBeRetried() async throws {

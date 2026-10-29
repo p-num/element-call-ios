@@ -91,6 +91,7 @@ public final class MatrixRTCMediaSession {
     @ObservationIgnored private var screenShareIntentDeadline: Task<Void, Never>?
     private static let screenShareIntentTimeout = Duration.seconds(10)
     public private(set) var isMediaDegraded = false
+    public private(set) var isOwnMediaDegraded = false
     public private(set) var hasEnded = false
     
     /// Every core event, after the call itself reacted to it.
@@ -354,6 +355,7 @@ public final class MatrixRTCMediaSession {
                     requestedCameraEnabled = false
                     cameraRequestID = UUID()
                     isCameraEnabled = false
+                    isCameraInterrupted = false
                     if capturesCamera {
                         camera.stop()
                     }
@@ -365,6 +367,8 @@ public final class MatrixRTCMediaSession {
             // Stop handing frames over immediately, even if a publication/unmute is still awaiting
             // the transport. Its completion reads this latest intent before starting capture.
             isCameraEnabled = false
+            // Stopping retires this capture session, including its interruption notifications.
+            isCameraInterrupted = false
             if capturesCamera {
                 camera.stop()
             }
@@ -943,6 +947,8 @@ public final class MatrixRTCMediaSession {
             MatrixRTCLog.info("Key index \(keyIndex) imported for \(memberID)")
         case .mediaConnectionDegraded(let degraded):
             isMediaDegraded = degraded
+        case .ownMediaConnectionDegraded(let degraded):
+            isOwnMediaDegraded = degraded
         case .participantJoined(let memberID, _, let participantCount):
             playJoinLeaveSound(.join, for: memberID, participantCount: participantCount)
         case .participantLeft(let memberID, let participantCount):
