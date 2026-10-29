@@ -16,18 +16,20 @@ final nonisolated class ElementCallSDKRoom: ElementCallMatrixRoomProtocol {
     let roomID: String
     
     private let transport: ElementCallSDKTransport
+    private let lease: ElementCallRoomBridgeLease
     private let bridge: any MatrixRTCRoomBridgeProtocol
     private let logger: (any ElementCallLoggingProtocol)?
     
-    init(roomID: String, transport: ElementCallSDKTransport, bridge: any MatrixRTCRoomBridgeProtocol, logger: (any ElementCallLoggingProtocol)?) {
+    init(roomID: String, transport: ElementCallSDKTransport, lease: ElementCallRoomBridgeLease, logger: (any ElementCallLoggingProtocol)?) {
         self.roomID = roomID
         self.transport = transport
-        self.bridge = bridge
+        self.lease = lease
+        bridge = lease.bridge
         self.logger = logger
     }
     
     func close() async {
-        await transport.closeBridge(roomID: roomID)
+        await transport.closeBridge(lease)
     }
     
     // MARK: - Feeds

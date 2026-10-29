@@ -300,14 +300,78 @@ struct CallGenerationTests {
         #expect(membership["m.call.intent"] as? String == "audio")
     }
     
+    @Test(arguments: [true, false])
+    func roomOpenAndJoinFailuresShowHostCopyAndKeepServiceDiagnostics(failsToOpenRoom: Bool) async throws {
+        let room = ElementCallFakeRoom()
+        let matrixRoom = HeldMatrixRoom(roomID: room.roomID, holdsJoin: !failsToOpenRoom)
+        let transport = HeldTransport(holdsOpen: failsToOpenRoom, room: matrixRoom)
+        let system = ElementCallFakeSystem()
+        let logger = ElementCallFakeLogger()
+        let strings = ElementCallStrings(callPreparationFailed: "Host preparation failure. Try again.",
+                                         callJoinFailed: "Host join failure. Try again.")
+        let controller = makeController(transport: transport, system: system, strings: strings, logger: logger)
+        controller.startCall(.init(isAudioCall: true, isStartingCall: false), room: room)
+        defer {
+            transport.open.fail()
+            matrixRoom.publication.fail()
+        }
+        if failsToOpenRoom {
+            try await waitUntil { transport.open.isPending }
+            transport.open.fail()
+        } else {
+            try await waitUntil { matrixRoom.publication.isPending }
+            matrixRoom.publication.fail()
+        }
+        try await waitUntil { system.requests.contains(.end(roomID: room.roomID)) }
+        
+        let expected = failsToOpenRoom ? strings.callPreparationFailed : strings.callJoinFailed
+        #expect(controller.connection == .failed(expected))
+        let stage = failsToOpenRoom ? "Could not open the room:" : "Join failed:"
+        #expect(logger.messages.contains { $0.contains(stage) && $0.contains("Forbidden") })
+        if failsToOpenRoom {
+            #expect(logger.messages.contains { $0.contains("M_FORBIDDEN") && $0.contains("403") })
+        }
+        #expect(!logger.messages.contains(expected))
+    }
+    
+    @Test
+    func aMicrophoneFailureShowsHostCopyAndKeepsMediaDiagnostics() async throws {
+        let system = ElementCallFakeSystem()
+        let logger = ElementCallFakeLogger()
+        let strings = ElementCallStrings(microphoneStartFailed: "Host microphone failure. Try again.")
+        let controller = makeController(transport: HeldTransport(), system: system, strings: strings, logger: logger)
+        let transport = FakeMediaSession(holdingPublish: .microphone)
+        let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
+        let room = ElementCallFakeRoom()
+        let call = MatrixRTCCall(rtcCall: FakeRtcCall())
+        controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false), room: room,
+                                   connection: .connectingMedia, call: media, rtcCall: call)
+        let prepareAudio: () -> Void = { }
+        let startup = Task { await controller.publishMedia(on: media, rtcCall: call, room: room, prepareAudio: prepareAudio) }
+        defer { transport.answerPublish() }
+        try await waitUntil { transport.hasPendingPublish }
+        transport.answerPublish(failingWith: MatrixRTCError.media("MIC_CAPTURE_FIXTURE"))
+        await startup.value
+        try await waitUntil { system.requests.contains(.end(roomID: room.roomID)) }
+        
+        #expect(controller.connection == .failed(strings.microphoneStartFailed))
+        #expect(logger.messages.contains { $0.contains("Microphone failed:") && $0.contains("MIC_CAPTURE_FIXTURE") })
+        #expect(!logger.messages.contains(strings.microphoneStartFailed))
+        await media.disconnect()
+    }
+    
     private func decode(_ contentJSON: String) throws -> [String: Any] {
         try #require(JSONSerialization.jsonObject(with: Data(contentJSON.utf8)) as? [String: Any])
     }
     
     private func makeController(transport: any ElementCallMatrixTransportProtocol,
-                                system: any ElementCallSystemProvidingProtocol = ElementCallFakeSystem()) -> ElementCallController {
-        ElementCallController(rtcClient: MatrixRTCClient(transport: transport), system: system,
-                              options: .init(), style: .stock, logger: nil)
+                                system: any ElementCallSystemProvidingProtocol = ElementCallFakeSystem(),
+                                strings: ElementCallStrings = .init(),
+                                logger: (any ElementCallLoggingProtocol)? = nil) -> ElementCallController {
+        let stock = ElementCallStyle.stock
+        let style = ElementCallStyle(theme: stock.theme, icons: stock.icons, avatars: stock.avatars, strings: strings)
+        return ElementCallController(rtcClient: MatrixRTCClient(transport: transport), system: system,
+                                     options: .init(), style: style, logger: logger)
     }
     
     private func replaceCall(_ controller: ElementCallController, in room: ElementCallFakeRoom) -> MatrixRTCCall {

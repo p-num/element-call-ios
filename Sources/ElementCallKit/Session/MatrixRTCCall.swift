@@ -29,8 +29,9 @@ public final class MatrixRTCCall {
     
     /// Who is in the call, from the core's membership projection, ourselves included.
     public private(set) var members: [MatrixRTCMembership] = []
+    /// People in the call, counting a user on multiple devices once.
     public var memberCount: Int {
-        members.count
+        Set(members.map(\.userID)).count
     }
     
     public private(set) var mediaSession: MatrixRTCMediaSession?

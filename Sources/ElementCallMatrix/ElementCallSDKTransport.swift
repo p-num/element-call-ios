@@ -27,9 +27,9 @@ public final class ElementCallSDKTransport: ElementCallMatrixTransportProtocol {
     
     private let client: Client
     private let logger: (any ElementCallLoggingProtocol)?
-    private var liveBridges = [String: LiveBridge]()
+    private let roomBridges: ElementCallRoomBridgeStore
     /// The core subscribes to to-device once; bridges come and go with calls.
-    private nonisolated let toDeviceRelay = ToDeviceRelay()
+    private nonisolated let toDeviceRelay: ToDeviceRelay
     
     public init?(client: Client, logger: (any ElementCallLoggingProtocol)? = nil) {
         guard let userID = try? client.userId(), let deviceID = try? client.deviceId() else {
@@ -40,59 +40,27 @@ public final class ElementCallSDKTransport: ElementCallMatrixTransportProtocol {
         self.logger = logger
         self.userID = userID
         self.deviceID = deviceID
+        let relay = ToDeviceRelay()
+        toDeviceRelay = relay
+        roomBridges = ElementCallRoomBridgeStore(relay: relay)
     }
     
     // MARK: - Rooms
     
     public nonisolated func openRoom(roomID: String) async throws -> any ElementCallMatrixRoomProtocol {
         try await onMain { transport in
-            let bridge = try await transport.openBridge(roomID: roomID)
-            return ElementCallSDKRoom(roomID: roomID, transport: transport, bridge: bridge, logger: transport.logger)
-        }
-    }
-    
-    func closeBridge(roomID: String) async {
-        let live = liveBridges.removeValue(forKey: roomID)
-        live?.toDeviceForwarder.cancel()
-        await live?.bridge.stop()
-    }
-    
-    /// A bridge and the task pumping its to-device messages into the relay, kept together so they
-    /// cannot exist apart.
-    ///
-    /// They were separate dictionaries once, and that cost an afternoon. A bridge used to be opened
-    /// either when joining or, earlier, by transport discovery, and the version that only started the
-    /// pump when joining skipped it whenever discovery had already opened one. Media keys then
-    /// arrived at the bridge and reached nobody, so no participant's frames decrypted and every
-    /// remote tile was black with `missingKey` in its stats. Audio survived because it is keyed the
-    /// same way but far more forgiving of a late key.
-    private struct LiveBridge {
-        let bridge: any MatrixRTCRoomBridgeProtocol
-        let toDeviceForwarder: Task<Void, Never>
-    }
-    
-    /// The only place a bridge is created, so everything a bridge needs is wired in one spot.
-    private func openBridge(roomID: String) async throws -> any MatrixRTCRoomBridgeProtocol {
-        if let live = liveBridges[roomID] {
-            return live.bridge
-        }
-        guard let bridge = try WidgetDriverFactory.makeBridge(room: room(roomID), roomID: roomID, logger: logger) else {
-            throw MatrixRTCTransportError.failed("Cannot open a Matrix bridge for \(roomID)")
-        }
-        // Subscribed before the start, so nothing the driver hands over once it is running can
-        // arrive ahead of the subscriber. A failed start closes the feed, which ends it.
-        let toDeviceMessages = bridge.toDeviceMessages()
-        if case .failure(let error) = await bridge.start() {
-            throw error.transportError
-        }
-        
-        let forwarder = Task { [relay = toDeviceRelay] in
-            for await message in toDeviceMessages {
-                relay.publish(message)
+            let lease = try await transport.roomBridges.open(roomID: roomID) {
+                guard let bridge = try WidgetDriverFactory.makeBridge(room: transport.room(roomID), roomID: roomID, logger: transport.logger) else {
+                    throw MatrixRTCTransportError.failed("Cannot open a Matrix bridge for \(roomID)")
+                }
+                return bridge
             }
+            return ElementCallSDKRoom(roomID: roomID, transport: transport, lease: lease, logger: transport.logger)
         }
-        liveBridges[roomID] = LiveBridge(bridge: bridge, toDeviceForwarder: forwarder)
-        return bridge
+    }
+    
+    func closeBridge(_ lease: ElementCallRoomBridgeLease) async {
+        await roomBridges.close(lease)
     }
     
     // MARK: - Session-wide
@@ -101,10 +69,11 @@ public final class ElementCallSDKTransport: ElementCallMatrixTransportProtocol {
     /// encrypts whenever its room is encrypted. Only one call runs at a time.
     public nonisolated func sendToDeviceMessage(eventType: String, messages: [String: [String: String]]) async throws -> [String: [String]] {
         let bridge = try await onMain { transport -> any MatrixRTCRoomBridgeProtocol in
-            if transport.liveBridges.count > 1 {
-                transport.logger?.log(.warning, "\(transport.liveBridges.count) live bridges, sending to-device through the first")
+            let bridges = transport.roomBridges.readyBridges
+            if bridges.count > 1 {
+                transport.logger?.log(.warning, "\(bridges.count) live bridges, sending to-device through the first")
             }
-            guard let bridge = transport.liveBridges.values.first?.bridge else {
+            guard let bridge = bridges.first else {
                 throw MatrixRTCTransportError.failed("No live call to send to-device messages through")
             }
             return bridge

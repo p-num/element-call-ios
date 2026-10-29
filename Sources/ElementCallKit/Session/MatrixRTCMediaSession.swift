@@ -327,11 +327,12 @@ public final class MatrixRTCMediaSession {
     /// the transport, including an enable operation that has not finished yet.
     public func setCameraEnabled(_ enabled: Bool) async throws {
         requestedCameraEnabled = enabled
+        // Even an already-enabled request supersedes an earlier operation's cancellation cleanup.
+        cameraRequestID = UUID()
+        let requestID = cameraRequestID
         if enabled, isCameraEnabled {
             return
         }
-        cameraRequestID = UUID()
-        let requestID = cameraRequestID
         if enabled {
             guard !hasEnded, !Task.isCancelled else { throw CancellationError() }
             let track = try await publishedCameraTrack()

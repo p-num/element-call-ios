@@ -87,6 +87,27 @@ struct CameraPublicationTests {
     }
     
     @Test
+    func aNewCameraEnableSurvivesAnEarlierEnableBeingCancelled() async throws {
+        let transport = FakeMediaSession()
+        let call = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
+        transport.holdNextMute(kind: .camera, muted: false)
+        let firstEnable = Task { try await call.setCameraEnabled(true) }
+        defer { transport.answerMute() }
+        try await waitUntil { transport.hasPendingMute }
+        #expect(call.isCameraEnabled)
+        
+        firstEnable.cancel()
+        try await call.setCameraEnabled(true)
+        transport.answerMute()
+        await #expect(throws: CancellationError.self) { try await firstEnable.value }
+        
+        #expect(call.isCameraEnabled)
+        #expect(transport.published.count == 1)
+        #expect(transport.appliedLocalMutes.last { $0.kind == .camera }?.muted == false)
+        await call.disconnect()
+    }
+    
+    @Test
     func anInterruptionWinsOverAnEarlierUnmuteAcknowledgement() async throws {
         let transport = FakeMediaSession()
         let call = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)

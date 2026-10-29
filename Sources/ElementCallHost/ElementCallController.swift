@@ -524,7 +524,7 @@ public final class ElementCallController {
             call = try await rtcCall.connectMedia()
         } catch {
             guard !Task.isCancelled, self.rtcCall === rtcCall else { return }
-            fail("Media failed: \(error)", generation: generation)
+            fail(style.strings.callMediaFailed, diagnostic: "Media failed: \(error)", generation: generation)
             return
         }
         // Before anything else: from here on the session is handling the core's events.
@@ -567,7 +567,7 @@ public final class ElementCallController {
         do {
             rtcRoom = try await rtcClient.room(roomID: room.roomID, format: format)
         } catch {
-            fail("Could not open the room: \(error)", generation: generation)
+            fail(style.strings.callPreparationFailed, diagnostic: "Could not open the room: \(error)", generation: generation)
             return nil
         }
         guard isCurrentCall(generation) else {
@@ -582,7 +582,7 @@ public final class ElementCallController {
                                                  notify: notify(for: callData, room: room))
         } catch {
             if isCurrentCall(generation) {
-                fail("Join failed: \(error)", generation: generation)
+                fail(style.strings.callJoinFailed, diagnostic: "Join failed: \(error)", generation: generation)
             } else {
                 await rtcRoom.shutdown()
             }
@@ -619,7 +619,7 @@ public final class ElementCallController {
             try await call.publishMicrophone(muted: pendingMicrophoneMuted)
         } catch {
             guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall else { return }
-            fail("Microphone failed: \(error)", generation: callGeneration)
+            fail(style.strings.microphoneStartFailed, diagnostic: "Microphone failed: \(error)", generation: callGeneration)
             return
         }
         guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall else {
@@ -797,9 +797,9 @@ public final class ElementCallController {
         logger?.log(level, message, file: file, line: line)
     }
     
-    func fail(_ message: String, generation: UUID) {
+    func fail(_ message: String, diagnostic: String? = nil, generation: UUID) {
         guard isCurrentCall(generation) else { return }
-        log(.error, message)
+        log(.error, diagnostic ?? message)
         // Failure is visible before the teardown task runs; keep a restart behind its cleanup.
         isTeardownPending = true
         connection = .failed(message)

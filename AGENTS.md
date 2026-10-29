@@ -388,8 +388,9 @@ is **scheduled for deletion**, and `WidgetMatrixBridge.swift`'s header lists the
 retire it and the removal steps. Do not build new features on it, and do not let it leak past
 `ElementCallSDKTransport` and `ElementCallSDKRoom`.
 
-`openBridge`, reached only through `openRoom`, is the **only** place a bridge is created,
-deliberately. An earlier version had two creation paths and only one wired up the to-device pump, so
+`ElementCallRoomBridgeStore.open`, reached only through `openRoom`, owns bridge creation and leases.
+Overlapping opens share its pending start; closing an old room releases only that room's lease.
+An earlier version had two creation paths and only one wired up the to-device pump, so
 media keys reached nobody and every remote tile went black. The bridge and its pump are one value now
 so the type system forbids that. Keep it that way.
 
