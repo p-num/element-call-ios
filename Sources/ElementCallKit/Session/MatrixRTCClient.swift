@@ -12,6 +12,10 @@ import MatrixRtc
 /// room until one is asked for. There is nothing to start and nothing to feed; the core subscribes
 /// to what a room needs, through the transport, when the room is opened.
 public final class MatrixRTCClient {
+    public var userID: String {
+        transport.userID
+    }
+    
     /// How long a room may take to become ready. The core waits for one delivery of every subject it
     /// subscribed to, with no deadline of its own, so a transport feed that never delivers would
     /// otherwise leave the join spinning for good.

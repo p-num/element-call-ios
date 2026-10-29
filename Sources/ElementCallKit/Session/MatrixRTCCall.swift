@@ -40,6 +40,8 @@ public final class MatrixRTCCall {
     @ObservationIgnored private let rtcCall: any RtcCallProtocol
     @ObservationIgnored private var leaveTask: Task<MatrixRTCLeaveResult, Never>?
     @ObservationIgnored private var membershipReader: Task<Void, Never>?
+    @ObservationIgnored private var membershipObservers: [UUID: AsyncStream<[MatrixRTCMembership]>.Continuation] = [:]
+    private var isStopped = false
     
     init(rtcCall: any RtcCallProtocol) {
         self.rtcCall = rtcCall
@@ -62,8 +64,30 @@ public final class MatrixRTCCall {
     }
     
     func stop() {
+        isStopped = true
         membershipReader?.cancel()
         membershipReader = nil
+        for observer in membershipObservers.values {
+            observer.finish()
+        }
+        membershipObservers.removeAll()
+    }
+    
+    /// Each observer gets the current Matrix membership and subsequent changes. SFU reconnects
+    /// do not imply departure, and multiple devices of one user remain separate memberships.
+    public func membershipSnapshots() -> AsyncStream<[MatrixRTCMembership]> {
+        let id = UUID()
+        return AsyncStream { continuation in
+            continuation.yield(members)
+            guard !isStopped else {
+                continuation.finish()
+                return
+            }
+            membershipObservers[id] = continuation
+            continuation.onTermination = { [weak self] _ in
+                Task { @MainActor in self?.membershipObservers.removeValue(forKey: id) }
+            }
+        }
     }
     
     /// Attaches media. The core takes the transport from the join and the account from the backend,
@@ -143,10 +167,13 @@ public final class MatrixRTCCall {
         }
     }
     
-    private func updateMembers(_ members: [MatrixRTCMembership]) {
+    func updateMembers(_ members: [MatrixRTCMembership]) {
         if members.map(\.memberID) != self.members.map(\.memberID) {
             MatrixRTCLog.info("\(members.count) member(s) in \(roomID)/\(slotID): \(members.map(\.memberID))")
         }
         self.members = members
+        for observer in membershipObservers.values {
+            observer.yield(members)
+        }
     }
 }

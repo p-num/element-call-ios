@@ -329,7 +329,7 @@ public final class MatrixRTCMediaSession {
                                                                                       video: FfiVideoSourceConfig(width: UInt32(size.width),
                                                                                                                   height: UInt32(size.height)),
                                                                                       simulcast: true,
-                                                                                      muted: false))
+                                                                                      muted: true))
                 } catch {
                     throw MatrixRTCError.media("Failed to publish the camera: \(error)")
                 }
@@ -337,7 +337,12 @@ public final class MatrixRTCMediaSession {
             }
             if capturesCamera {
                 camera.setInterfaceOrientation(currentInterfaceOrientation)
-                try camera.start(track: track)
+                do {
+                    try camera.start(track: track)
+                } catch {
+                    camera.stop()
+                    throw error
+                }
                 isFrontCamera = camera.isFrontFacing
             }
             await setTransportMuted(.camera, muted: false)

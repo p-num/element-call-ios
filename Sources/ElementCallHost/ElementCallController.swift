@@ -159,6 +159,8 @@ public final class ElementCallController {
     private let logger: (any ElementCallLoggingProtocol)?
     private let actionsSubject = PassthroughSubject<ElementCallControllerAction, Never>()
     private var eventsTask: Task<Void, Never>?
+    private var membershipTask: Task<Void, Never>?
+    private var isEndingCall = false
     private var routeObserver: NSObjectProtocol?
     private var cancellables = Set<AnyCancellable>()
     
@@ -216,6 +218,10 @@ public final class ElementCallController {
     }
     
     // MARK: - Lifecycle
+    
+    isolated deinit {
+        membershipTask?.cancel()
+    }
     
     public func startCall(_ callData: ElementCallData, room: any ElementCallRoomContextProtocol) {
         guard !isInCall else {
@@ -318,16 +324,14 @@ public final class ElementCallController {
     
     public func setCameraEnabled(_ enabled: Bool) {
         Task {
-            do {
-                if enabled, await !requestCameraAccess() {
-                    return
-                }
-                // After the gate, so declining the prompt leaves the intent off rather than joining
-                // with a camera the user was never given.
-                pendingCameraEnabled = enabled
-                try await call?.setCameraEnabled(enabled)
-            } catch {
-                log(.warning, "could not \(enabled ? "enable" : "disable") the camera: \(error)")
+            if enabled, await !requestCameraAccess() {
+                return
+            }
+            // After the gate, so declining the prompt leaves the intent off rather than joining
+            // with a camera the user was never given.
+            pendingCameraEnabled = enabled
+            if let call {
+                await applyCameraEnabled(enabled, on: call)
             }
         }
     }
@@ -540,6 +544,7 @@ public final class ElementCallController {
             await abandon(rtcCall: rtcCall, roomID: room.roomID)
             return nil
         }
+        observeDirectCallMembership(rtcCall, isDirect: room.isDirect)
         return rtcCall
     }
     
@@ -584,7 +589,7 @@ public final class ElementCallController {
         }
         
         if pendingCameraEnabled, await requestCameraAccess(), !Task.isCancelled {
-            try? await call.setCameraEnabled(true)
+            await applyCameraEnabled(true, on: call)
         }
         guard !Task.isCancelled else {
             await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
@@ -603,6 +608,41 @@ public final class ElementCallController {
         guard case .ended = event else { return }
         // From a different task than the event collector: teardown cancels that task.
         Task { await endCall(leave: false) }
+    }
+    
+    func applyCameraEnabled(_ enabled: Bool, on call: MatrixRTCMediaSession) async {
+        do {
+            try await call.setCameraEnabled(enabled)
+        } catch {
+            log(.warning, "could not \(enabled ? "enable" : "disable") the camera: \(error)")
+            errorMessage = "The camera could not \(enabled ? "start" : "stop"). \(Self.describe(error))"
+        }
+    }
+    
+    /// Match Element Call's Direct preset: only a transition from another user's membership
+    /// to none ends our participation. A transport outage or our other device is not a peer.
+    func observeDirectCallMembership(_ rtcCall: MatrixRTCCall, isDirect: Bool) {
+        membershipTask?.cancel()
+        membershipTask = nil
+        guard isDirect else { return }
+        let snapshots = rtcCall.membershipSnapshots()
+        let userID = rtcClient.userID
+        membershipTask = Task { [weak self] in
+            var hadOtherUser = false
+            for await members in snapshots {
+                guard !Task.isCancelled, let self, self.rtcCall === rtcCall, isInCall else { return }
+                let hasOtherUser = members.contains { $0.userID != userID }
+                if hadOtherUser, !hasOtherUser {
+                    // Teardown cancels the reader; the leave send must run outside that task.
+                    Task { [weak self] in
+                        guard let self, self.rtcCall === rtcCall, isInCall else { return }
+                        await endCall(leave: true)
+                    }
+                    return
+                }
+                hadOtherUser = hasOtherUser
+            }
+        }
     }
     
     /// Only when *starting* a call; joining one someone else started happens quietly. A direct chat
@@ -673,12 +713,16 @@ public final class ElementCallController {
     }
     
     private func endCall(leave: Bool) async {
-        guard let roomID = room?.roomID else { return }
+        guard !isEndingCall, let roomID = room?.roomID else { return }
+        isEndingCall = true
+        defer { isEndingCall = false }
         log(.info, "ending call in \(roomID) (leave=\(leave))")
         runTask?.cancel()
         runTask = nil
         eventsTask?.cancel()
         eventsTask = nil
+        membershipTask?.cancel()
+        membershipTask = nil
         pictureInPicture.unbind()
         
         if let rtcCall {
