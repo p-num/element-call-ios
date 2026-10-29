@@ -12,6 +12,10 @@ import MatrixRtc
 /// room until one is asked for. There is nothing to start and nothing to feed; the core subscribes
 /// to what a room needs, through the transport, when the room is opened.
 public final class MatrixRTCClient {
+    public var userID: String {
+        transport.userID
+    }
+    
     /// How long a room may take to become ready. The core waits for one delivery of every subject it
     /// subscribed to, with no deadline of its own, so a transport feed that never delivers would
     /// otherwise leave the join spinning for good.
@@ -37,16 +41,24 @@ public final class MatrixRTCClient {
             MatrixRTCLog.error("The transport could not open \(roomID): \(error)")
             throw MatrixRTCError.transport("\(error)")
         }
+        guard !Task.isCancelled else {
+            await matrixRoom.close()
+            throw CancellationError()
+        }
         // Before the core asks for anything: it subscribes from inside `room`.
         backend.register(matrixRoom)
         
         MatrixRTCLog.info("Opening \(roomID) in format \(format)")
         do {
             let rtcRoom = try await seededRoom(roomID: roomID, format: format)
+            guard !Task.isCancelled else {
+                await rtcRoom.shutdown()
+                throw CancellationError()
+            }
             MatrixRTCLog.info("\(roomID) is ready")
             return MatrixRTCRoom(rtcRoom: rtcRoom, matrixRoom: matrixRoom, backend: backend)
         } catch {
-            backend.unregister(roomID: roomID)
+            backend.unregister(roomID: roomID, matching: matrixRoom)
             await matrixRoom.close()
             throw error
         }
@@ -115,11 +127,13 @@ public final class MatrixRTCRoom {
     
     /// Joins the room's call. No slot is named: the core joins the room-wide one, and picks the
     /// transport from what the homeserver advertises, failing the join when it advertises none.
-    public func joinCall(notify: MatrixRTCNotify?) async throws -> MatrixRTCCall {
+    /// Intent describes the membership even when joining quietly; notification policy stays separate.
+    public func joinCall(intent: MatrixRTCCallIntent? = nil, notify: MatrixRTCNotify?) async throws -> MatrixRTCCall {
         guard !isShutDown else { throw MatrixRTCError.ffi("\(roomID) is shut down") }
         let rtcCall: RtcCall
         do {
             rtcCall = try await rtcRoom.joinCall(params: FfiJoinSessionParams(applicationSlotId: nil,
+                                                                              callIntent: intent?.rawValue,
                                                                               transport: .advertised,
                                                                               keepAliveTimeoutMs: Self.keepAliveTimeoutMs,
                                                                               stickyDurationMs: nil, // The core owns the membership lifetime.
@@ -147,7 +161,7 @@ public final class MatrixRTCRoom {
         await rtcRoom.shutdown()
         call?.stop()
         call = nil
-        backend.unregister(roomID: roomID)
+        backend.unregister(roomID: roomID, matching: matrixRoom)
         await matrixRoom.close()
         MatrixRTCLog.info("Shut \(roomID) down")
     }

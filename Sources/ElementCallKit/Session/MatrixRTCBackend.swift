@@ -37,8 +37,11 @@ final nonisolated class MatrixRTCBackend: MatrixBackend {
         }
     }
     
-    func unregister(roomID: String) {
+    func unregister(roomID: String, matching room: (any ElementCallMatrixRoomProtocol)? = nil) {
         rooms.withLock { rooms in
+            if let room, rooms.byID[roomID] !== room {
+                return
+            }
             rooms.byID[roomID] = nil
             rooms.order.removeAll { $0 == roomID }
         }

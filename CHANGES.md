@@ -11,6 +11,10 @@ version will actually read it.
 
 ## Unreleased
 
+- Hosts can implement `ElementCallSystemProvidingProtocol.reportDisconnected(roomID:)` to
+  reflect reconnection of this device's publishing media while retaining the same system call.
+  Its default implementation does nothing; forward it into the host's connection indicator.
+
 - Hosts switching calls must check `controller.lastDeparture` for the expected room and a
   `.confirmed` result. `.ended` still means local teardown. `MatrixRTCCall.leave()` now returns
   its original departure result to concurrent/repeated callers, including a retained failure.

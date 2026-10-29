@@ -85,6 +85,8 @@ public final class ElementCallController {
     /// dropped: the button snapped back on the next refresh and the microphone went up unmuted.
     private var pendingMicrophoneMuted = false
     private var pendingCameraEnabled = false
+    private var isMediaPublicationReady = false
+    private var cameraPermissionRequestID = UUID()
     
     /// Computed rather than mirrored, so the call is the single truth the moment it exists and the
     /// two cannot drift -- `applySystemMute(_:)` writes to the call directly.
@@ -159,6 +161,11 @@ public final class ElementCallController {
     private let logger: (any ElementCallLoggingProtocol)?
     private let actionsSubject = PassthroughSubject<ElementCallControllerAction, Never>()
     private var eventsTask: Task<Void, Never>?
+    private var membershipTask: Task<Void, Never>?
+    private var isEndingCall = false
+    private var isTeardownPending = false
+    /// Pre-media work has no session identity yet; a restart in the same room is still a new call.
+    private(set) var callGeneration = UUID()
     private var routeObserver: NSObjectProtocol?
     private var cancellables = Set<AnyCancellable>()
     
@@ -208,7 +215,8 @@ public final class ElementCallController {
                     audioSessionDidDeactivate()
                 case .microphoneMuteChanged(let isMuted):
                     applySystemMute(isMuted)
-                case .endCallRequested:
+                case .endCallRequested(let roomID):
+                    guard roomID == room?.roomID else { return }
                     hangUp()
                 }
             }
@@ -217,11 +225,20 @@ public final class ElementCallController {
     
     // MARK: - Lifecycle
     
+    isolated deinit {
+        eventsTask?.cancel()
+        membershipTask?.cancel()
+    }
+    
     public func startCall(_ callData: ElementCallData, room: any ElementCallRoomContextProtocol) {
-        guard !isInCall else {
+        guard !isInCall, !isEndingCall, !isTeardownPending else {
             log(.warning, "already in a call, ignoring start for \(room.roomID)")
             return
         }
+        runTask?.cancel()
+        callGeneration = UUID()
+        let generation = callGeneration
+        isMediaPublicationReady = false
         lastDeparture = nil
         self.callData = callData
         self.room = room
@@ -242,11 +259,15 @@ public final class ElementCallController {
                                                                   style: style))
         }
         
-        runTask = Task { await runCall(callData, room: room) }
+        runTask = Task { await runCall(callData, room: room, generation: generation) }
     }
     
     public func hangUp() {
-        Task { await endCall(leave: true) }
+        let generation = callGeneration
+        Task {
+            guard callGeneration == generation else { return }
+            await endCall(leave: true)
+        }
     }
     
     /// The view where the system anchors the Picture in Picture shrink animation. The host places it
@@ -297,7 +318,11 @@ public final class ElementCallController {
     /// ``applySystemMute(_:)``.
     public func setMicrophoneMuted(_ muted: Bool) {
         pendingMicrophoneMuted = muted
-        Task { await call?.setMicrophoneMuted(muted) }
+        let generation = callGeneration
+        Task {
+            guard isCurrentCall(generation) else { return }
+            await call?.setMicrophoneMuted(muted)
+        }
         // Only the system needs a room. The intent above is recorded either way, or a mute made
         // before the call connects is lost.
         if let roomID = room?.roomID {
@@ -313,22 +338,36 @@ public final class ElementCallController {
     func applySystemMute(_ muted: Bool) {
         guard isMicrophoneMuted != muted else { return }
         pendingMicrophoneMuted = muted
-        Task { await call?.setMicrophoneMuted(muted) }
+        let generation = callGeneration
+        Task {
+            guard isCurrentCall(generation) else { return }
+            await call?.setMicrophoneMuted(muted)
+        }
     }
     
     public func setCameraEnabled(_ enabled: Bool) {
-        Task {
-            do {
-                if enabled, await !requestCameraAccess() {
-                    return
-                }
-                // After the gate, so declining the prompt leaves the intent off rather than joining
-                // with a camera the user was never given.
-                pendingCameraEnabled = enabled
-                try await call?.setCameraEnabled(enabled)
-            } catch {
-                log(.warning, "could not \(enabled ? "enable" : "disable") the camera: \(error)")
+        let generation = callGeneration
+        Task { await setCameraEnabled(enabled, generation: generation) }
+    }
+    
+    func setCameraEnabled(_ enabled: Bool, generation: UUID, cameraAccess: (() async -> Bool)? = nil) async {
+        guard isCurrentCall(generation) else { return }
+        cameraPermissionRequestID = UUID()
+        let requestID = cameraPermissionRequestID
+        if enabled {
+            let hasAccess: Bool
+            if let cameraAccess {
+                hasAccess = await cameraAccess()
+            } else {
+                hasAccess = await requestCameraAccess()
             }
+            guard hasAccess else { return }
+        }
+        guard isCurrentCall(generation), cameraPermissionRequestID == requestID else { return }
+        // A permission reply may arrive after a new media session for this same call is installed.
+        pendingCameraEnabled = enabled
+        if let call {
+            await applyCameraEnabled(enabled, on: call)
         }
     }
     
@@ -469,33 +508,41 @@ public final class ElementCallController {
     /// them.
     private var runTask: Task<Void, Never>?
     
-    private func runCall(_ callData: ElementCallData, room: any ElementCallRoomContextProtocol) async {
+    private func isCurrentCall(_ generation: UUID) -> Bool {
+        !Task.isCancelled && callGeneration == generation && !isEndingCall && isInCall
+    }
+    
+    private func runCall(_ callData: ElementCallData, room: any ElementCallRoomContextProtocol, generation: UUID) async {
+        guard isCurrentCall(generation) else { return }
         log(.info, "joining \(room.roomID)")
-        guard let rtcCall = await joinCall(for: callData, room: room) else { return }
+        guard let rtcCall = await joinCall(for: callData, room: room, generation: generation) else { return }
+        guard !Task.isCancelled, self.rtcCall === rtcCall, !isEndingCall, isInCall else { return }
         
         connection = .connectingMedia
         let call: MatrixRTCMediaSession
         do {
             call = try await rtcCall.connectMedia()
         } catch {
-            fail("Media failed: \(error)")
+            guard !Task.isCancelled, self.rtcCall === rtcCall else { return }
+            fail("Media failed: \(error)", generation: generation)
             return
         }
         // Before anything else: from here on the session is handling the core's events.
         call.participantCapForJoinLeaveSounds = options.participantCapForJoinLeaveSounds
-        guard !Task.isCancelled else {
+        guard !Task.isCancelled, self.rtcCall === rtcCall, !isEndingCall, isInCall else {
             await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
             return
         }
-        self.call = call
-        bindPictureInPictureIfEnabled(call)
+        installMediaSession(call)
         
         await publishMedia(on: call, rtcCall: rtcCall, room: room)
     }
     
     /// Claims the system call, opens the room and joins its call, which puts our membership out.
-    private func joinCall(for callData: ElementCallData,
-                          room: any ElementCallRoomContextProtocol) async -> MatrixRTCCall? {
+    func joinCall(for callData: ElementCallData,
+                  room: any ElementCallRoomContextProtocol,
+                  generation: UUID) async -> MatrixRTCCall? {
+        guard isCurrentCall(generation) else { return nil }
         // Claim the system call *before* our membership goes out: the incoming-call watcher reads
         // our own membership as "answered elsewhere" and would end the ringing call under us.
         // For an outgoing call this requests the start action; the system activates the audio session
@@ -506,6 +553,7 @@ public final class ElementCallController {
             log(.warning, "could not configure the audio session: \(error)")
         }
         await system.startCall(roomID: room.roomID, displayName: room.displayName, isVideo: !callData.isAudioCall)
+        guard isCurrentCall(generation) else { return nil }
         
         // Pinned whatever the host prefers: a join in the other formats fails in an Element Call room
         // that has no open MSC4143 slot, which is every one of them today, and nothing here opens one.
@@ -519,34 +567,83 @@ public final class ElementCallController {
         do {
             rtcRoom = try await rtcClient.room(roomID: room.roomID, format: format)
         } catch {
-            fail("Could not open the room: \(error)")
+            fail("Could not open the room: \(error)", generation: generation)
+            return nil
+        }
+        guard isCurrentCall(generation) else {
+            await rtcRoom.shutdown()
             return nil
         }
         self.rtcRoom = rtcRoom
-        guard !Task.isCancelled else {
-            await shutDownRoom()
-            return nil
-        }
         
         let rtcCall: MatrixRTCCall
         do {
-            rtcCall = try await rtcRoom.joinCall(notify: notify(for: callData, room: room))
+            rtcCall = try await rtcRoom.joinCall(intent: callData.isAudioCall ? .audio : .video,
+                                                 notify: notify(for: callData, room: room))
         } catch {
-            fail("Join failed: \(error)")
+            if isCurrentCall(generation) {
+                fail("Join failed: \(error)", generation: generation)
+            } else {
+                await rtcRoom.shutdown()
+            }
+            return nil
+        }
+        guard isCurrentCall(generation) else {
+            await rtcCall.leave()
+            await rtcRoom.shutdown()
             return nil
         }
         self.rtcCall = rtcCall
-        guard !Task.isCancelled else {
-            await abandon(rtcCall: rtcCall, roomID: room.roomID)
-            return nil
-        }
+        observeDirectCallMembership(rtcCall, isDirect: room.isDirect)
         return rtcCall
     }
     
     /// Microphone, then camera for a video call. The call counts as connected once the microphone is up.
-    private func publishMedia(on call: MatrixRTCMediaSession,
-                              rtcCall: MatrixRTCCall,
-                              room: any ElementCallRoomContextProtocol) async {
+    func publishMedia(on call: MatrixRTCMediaSession,
+                      rtcCall: MatrixRTCCall,
+                      room: any ElementCallRoomContextProtocol,
+                      prepareAudio: (() -> Void)? = nil,
+                      cameraAccess: (() async -> Bool)? = nil) async {
+        guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall,
+              connection == .connectingMedia else { return }
+        if let prepareAudio {
+            prepareAudio()
+        } else {
+            prepareAudioForMedia()
+        }
+        
+        // `pendingMicrophoneMuted`, not `isMicrophoneMuted`: `self.call` is assigned before this runs,
+        // so the accessor would already be answering from the fresh call -- unmuted -- and would
+        // discard a mute made while joining. The same goes for the camera below.
+        do {
+            try await call.publishMicrophone(muted: pendingMicrophoneMuted)
+        } catch {
+            guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall else { return }
+            fail("Microphone failed: \(error)", generation: callGeneration)
+            return
+        }
+        guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall else {
+            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
+            return
+        }
+        log(.info, "connected as \(call.localMemberID)")
+        
+        completeMediaStartup(on: call, roomID: room.roomID)
+        if pendingCameraEnabled {
+            // Camera permission and capture must not hold an otherwise connected audio call open.
+            let hasAccess: Bool
+            if let cameraAccess {
+                hasAccess = await cameraAccess()
+            } else {
+                hasAccess = await requestCameraAccess()
+            }
+            guard hasAccess, pendingCameraEnabled, !Task.isCancelled, self.call === call,
+                  !call.hasEnded, !isEndingCall, isInCall else { return }
+            await applyCameraEnabled(true, on: call)
+        }
+    }
+    
+    private func prepareAudioForMedia() {
         // Where nothing else owns the session, we do: the simulator, and an iOS app on macOS,
         // where the host's system-call port is inert because CallKit is unavailable. Runtime
         // rather than `#if`, because an iOS-on-Mac binary is indistinguishable from an iOS one at
@@ -561,48 +658,104 @@ public final class ElementCallController {
         }
         // The system usually activated the session while we were still joining.
         startAudioIfReady()
-        
-        // `pendingMicrophoneMuted`, not `isMicrophoneMuted`: `self.call` is assigned before this runs,
-        // so the accessor would already be answering from the fresh call -- unmuted -- and would
-        // discard a mute made while joining. The same goes for the camera below.
-        do {
-            try await call.publishMicrophone(muted: pendingMicrophoneMuted)
-        } catch {
-            fail("Microphone failed: \(error)")
-            return
-        }
-        guard !Task.isCancelled else {
-            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
-            return
-        }
-        log(.info, "connected as \(call.localMemberID)")
-        
-        eventsTask = Task { [weak self] in
-            for await event in call.events {
-                self?.handle(event)
-            }
-        }
-        
-        if pendingCameraEnabled, await requestCameraAccess(), !Task.isCancelled {
-            try? await call.setCameraEnabled(true)
-        }
-        guard !Task.isCancelled else {
-            await abandon(rtcCall: rtcCall, call: call, roomID: room.roomID)
-            return
-        }
-        
-        connection = .connected
-        connectedAt = .now
-        refreshAudioRoute()
-        system.reportConnected(roomID: room.roomID)
     }
     
-    private func handle(_ event: MatrixRTCCallEvent) {
-        // Everything else this switch used to carry existed only to recompute the spotlight, which
-        // the model now ranks and damps for us.
-        guard case .ended = event else { return }
-        // From a different task than the event collector: teardown cancels that task.
-        Task { await endCall(leave: false) }
+    func installMediaSession(_ call: MatrixRTCMediaSession) {
+        isMediaPublicationReady = false
+        self.call = call
+        observeMediaSession(call)
+        bindPictureInPictureIfEnabled(call)
+    }
+    
+    func observeMediaSession(_ call: MatrixRTCMediaSession) {
+        eventsTask?.cancel()
+        eventsTask = Task { [weak self] in
+            for await event in call.events {
+                guard !Task.isCancelled, let self, self.call === call else { return }
+                handle(event, from: call)
+            }
+        }
+    }
+    
+    func completeMediaStartup(on call: MatrixRTCMediaSession, roomID: String) {
+        guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall,
+              connection == .connectingMedia, room?.roomID == roomID else { return }
+        isMediaPublicationReady = true
+        updateOwnMediaConnection(on: call, roomID: roomID)
+    }
+    
+    func handle(_ event: MatrixRTCCallEvent, from call: MatrixRTCMediaSession) {
+        guard !Task.isCancelled, self.call === call, !isEndingCall, isInCall else { return }
+        switch event {
+        case .ownMediaConnectionDegraded:
+            guard let roomID = room?.roomID else { return }
+            updateOwnMediaConnection(on: call, roomID: roomID)
+        case .ended:
+            // From a different task than the event collector: teardown cancels that task.
+            Task { [weak self] in
+                guard let self, self.call === call, !isEndingCall, isInCall else { return }
+                await endCall(leave: false)
+            }
+        default:
+            // Aggregate degradation includes remote transports; it is not our connection state.
+            break
+        }
+    }
+    
+    private func updateOwnMediaConnection(on call: MatrixRTCMediaSession, roomID: String) {
+        guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall,
+              isInCall, room?.roomID == roomID else { return }
+        // Read current health: buffered obsolete events must not replay an outage after recovery.
+        if call.isOwnMediaDegraded {
+            guard connection == .connected else { return }
+            connection = .connectingMedia
+            system.reportDisconnected(roomID: roomID)
+        } else {
+            guard isMediaPublicationReady, connection == .connectingMedia else { return }
+            connection = .connected
+            if connectedAt == nil {
+                connectedAt = .now
+            }
+            refreshAudioRoute()
+            system.reportConnected(roomID: roomID)
+        }
+    }
+    
+    func applyCameraEnabled(_ enabled: Bool, on call: MatrixRTCMediaSession) async {
+        guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall, isInCall else { return }
+        do {
+            try await call.setCameraEnabled(enabled)
+        } catch {
+            guard !Task.isCancelled, self.call === call, !call.hasEnded, !isEndingCall, isInCall else { return }
+            log(.warning, "could not \(enabled ? "enable" : "disable") the camera: \(error)")
+            errorMessage = "The camera could not \(enabled ? "start" : "stop"). \(Self.describe(error))"
+        }
+    }
+    
+    /// Match Element Call's Direct preset: only a transition from another user's membership
+    /// to none ends our participation. A transport outage or our other device is not a peer.
+    func observeDirectCallMembership(_ rtcCall: MatrixRTCCall, isDirect: Bool) {
+        membershipTask?.cancel()
+        membershipTask = nil
+        guard isDirect else { return }
+        let snapshots = rtcCall.membershipSnapshots()
+        let userID = rtcClient.userID
+        membershipTask = Task { [weak self] in
+            var hadOtherUser = false
+            for await members in snapshots {
+                guard !Task.isCancelled, let self, self.rtcCall === rtcCall, isInCall else { return }
+                let hasOtherUser = members.contains { $0.userID != userID }
+                if hadOtherUser, !hasOtherUser {
+                    // Teardown cancels the reader; the leave send must run outside that task.
+                    Task { [weak self] in
+                        guard let self, self.rtcCall === rtcCall, isInCall else { return }
+                        await endCall(leave: true)
+                    }
+                    return
+                }
+                hadOtherUser = hasOtherUser
+            }
+        }
     }
     
     /// Only when *starting* a call; joining one someone else started happens quietly. A direct chat
@@ -644,10 +797,16 @@ public final class ElementCallController {
         logger?.log(level, message, file: file, line: line)
     }
     
-    private func fail(_ message: String) {
+    func fail(_ message: String, generation: UUID) {
+        guard isCurrentCall(generation) else { return }
         log(.error, message)
+        // Failure is visible before the teardown task runs; keep a restart behind its cleanup.
+        isTeardownPending = true
         connection = .failed(message)
-        Task { await endCall(leave: true) }
+        Task {
+            guard callGeneration == generation else { return }
+            await endCall(leave: true)
+        }
     }
     
     /// Tears down what a join produced after the call was ended under it. Leaving is idempotent, so a
@@ -656,7 +815,10 @@ public final class ElementCallController {
         log(.info, "join of \(roomID) was cancelled, releasing what it set up")
         await call?.disconnect()
         await rtcCall.leave()
-        await shutDownRoom()
+        // A cancelled join can finish after a replacement starts; only its own room may close.
+        if self.rtcCall === rtcCall {
+            await shutDownRoom()
+        }
         if self.call === call {
             self.call = nil
         }
@@ -673,12 +835,17 @@ public final class ElementCallController {
     }
     
     private func endCall(leave: Bool) async {
-        guard let roomID = room?.roomID else { return }
+        guard !isEndingCall, let roomID = room?.roomID else { return }
+        isEndingCall = true
+        isTeardownPending = false
+        isMediaPublicationReady = false
         log(.info, "ending call in \(roomID) (leave=\(leave))")
         runTask?.cancel()
         runTask = nil
         eventsTask?.cancel()
         eventsTask = nil
+        membershipTask?.cancel()
+        membershipTask = nil
         pictureInPicture.unbind()
         
         if let rtcCall {
@@ -712,12 +879,15 @@ public final class ElementCallController {
             connection = .ended
         }
         connectedAt = nil
+        // Hosts can synchronously reset and start the next call from the ended callback.
+        isEndingCall = false
         actionsSubject.send(.ended)
     }
     
     /// Back to idle once the screen has gone; a new call can start.
     public func reset() {
-        guard !isInCall else { return }
+        guard !isInCall, !isTeardownPending else { return }
+        isMediaPublicationReady = false
         callData = nil
         room = nil
         connection = .idle
@@ -733,9 +903,12 @@ public final class ElementCallController {
                          connectedAt: Date? = nil,
                          call: MatrixRTCMediaSession? = nil,
                          rtcCall: MatrixRTCCall? = nil) {
+        callGeneration = UUID()
+        isTeardownPending = false
         self.callData = callData
         self.room = room
         self.connection = connection
+        isMediaPublicationReady = connection == .connected
         self.connectedAt = connectedAt
         self.call = call
         self.rtcCall = rtcCall

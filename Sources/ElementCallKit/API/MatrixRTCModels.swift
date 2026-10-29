@@ -374,6 +374,8 @@ public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
     case handLowered(memberID: String)
     case reaction(memberID: String, emoji: String, name: String)
     case mediaConnectionDegraded(Bool)
+    /// This device's publishing connection, independently of remote transport health.
+    case ownMediaConnectionDegraded(Bool)
     case ended(MatrixRTCEndReason)
 }
 

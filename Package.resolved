@@ -1,69 +1,69 @@
 {
-  "originHash" : "5da5a81275fddeb7db5f910f9f74b3482ed9d349f13e37f677021410b829d254",
-  "pins" : [
+  "originHash": "477a2ba0396f8575b73d18ae82896e2aa7e182f463d4663faf5d2282abaf29a3",
+  "pins": [
     {
-      "identity" : "compound-design-tokens",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/element-hq/compound-design-tokens",
-      "state" : {
-        "revision" : "86c15ef71798581d1e0cc39a7f99e598ad572419",
-        "version" : "11.0.0"
+      "identity": "compound-design-tokens",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/element-hq/compound-design-tokens",
+      "state": {
+        "revision": "28b921601ac0ff49a572b6f18526d97bd14e5d91",
+        "version": "11.3.1"
       }
     },
     {
-      "identity" : "matrix-rust-components-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://git.postnumber.com/letro/matrix-rust-components-swift",
-      "state" : {
-        "revision" : "6ec2c0d275bc2e5746795496151b669c547e3561",
-        "version" : "26.10.13-letro.1"
+      "identity": "matrix-rust-components-swift",
+      "kind": "remoteSourceControl",
+      "location": "https://git.postnumber.com/letro/matrix-rust-components-swift",
+      "state": {
+        "revision": "998092edb7db4d92530a5bf942db3cc0d7e36cdd",
+        "version": "26.10.13-letro.3"
       }
     },
     {
-      "identity" : "matrix-rust-rtc",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/p-num/matrix-rust-rtc",
-      "state" : {
-        "revision" : "76f120b874f2e60f3f3106df42dbabc944e2897a",
-        "version" : "0.5.0-rc.4-letro.1"
+      "identity": "matrix-rust-rtc",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/p-num/matrix-rust-rtc",
+      "state": {
+        "revision": "797783be84800eddab0ab40b581961a7ec49804a",
+        "version": "0.5.0-rc.4-letro.2"
       }
     },
     {
-      "identity" : "swift-custom-dump",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-custom-dump",
-      "state" : {
-        "revision" : "4fb9e7cbb4b8f5a7354005db39447f570d6b3e19",
-        "version" : "1.7.3"
+      "identity": "swift-custom-dump",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-custom-dump",
+      "state": {
+        "revision": "82645ec760917961cfa08c9c0c7104a57a0fa4b1",
+        "version": "1.3.3"
       }
     },
     {
-      "identity" : "swift-snapshot-testing",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/swift-snapshot-testing",
-      "state" : {
-        "revision" : "59a99c458de4d2dee580529b61b4f78dca7b7fa6",
-        "version" : "1.19.4"
+      "identity": "swift-snapshot-testing",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/swift-snapshot-testing",
+      "state": {
+        "revision": "28e5de025e3fd98991791bfbf83023ab3708da03",
+        "version": "1.19.6"
       }
     },
     {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-syntax",
-      "state" : {
-        "revision" : "79e4b74a295b6eb74a8b585e3a39d29e70c1dbd1",
-        "version" : "603.0.2"
+      "identity": "swift-syntax",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/swiftlang/swift-syntax",
+      "state": {
+        "revision": "050f1a346fbbac0ca2cfb15a95274f7bd1cf0ccf",
+        "version": "604.0.0"
       }
     },
     {
-      "identity" : "xctest-dynamic-overlay",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/pointfreeco/xctest-dynamic-overlay",
-      "state" : {
-        "revision" : "d9308ad679143c26a30dec52daefe82f54af2b82",
-        "version" : "1.13.1"
+      "identity": "xctest-dynamic-overlay",
+      "kind": "remoteSourceControl",
+      "location": "https://github.com/pointfreeco/xctest-dynamic-overlay",
+      "state": {
+        "revision": "34e463e98ab8541c604af706c99bed7160f5ec70",
+        "version": "1.8.1"
       }
     }
   ],
-  "version" : 3
+  "version": 3
 }
