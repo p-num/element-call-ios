@@ -24,8 +24,8 @@
       "kind": "remoteSourceControl",
       "location": "https://github.com/p-num/matrix-rust-rtc",
       "state": {
-        "revision": "797783be84800eddab0ab40b581961a7ec49804a",
-        "version": "0.5.0-rc.4-letro.2"
+        "revision": "66345e8e54b8ef720fd4eb6e86fe50f5d92e52b8",
+        "version": "0.5.0-rc.4-letro.3"
       }
     },
     {
