@@ -27,6 +27,15 @@ import SwiftUI
 /// `-headset` connects pretend AirPods to every fixture, so the audio button is a menu.
 @main
 struct ElementCallExampleApp: App {
+    /// The package's and the core's log, on stderr, which `devicectl ... launch --console` and
+    /// Xcode's console both show. Without a sink the core drops every line, which left a fixture
+    /// that made no sound on a phone with nothing to say why.
+    init() {
+        MatrixRTCLogging.install { record in
+            FileHandle.standardError.write(Data("[\(record.target)] \(record.message)\n".utf8))
+        }
+    }
+    
     var body: some Scene {
         WindowGroup {
             ElementCallExampleRootView(target: .fromLaunchArguments())

@@ -129,6 +129,7 @@ public nonisolated struct ElementCallTokenIcons: ElementCallIconRenderingProtoco
         case .micOff: icons.micOffSolid
         case .videoCall: icons.videoCallSolid
         case .videoCallOff: icons.videoCallOffSolid
+        case .voiceCall: icons.voiceCallSolid
         case .switchCamera: icons.switchCameraSolid
         case .shareScreen: icons.shareScreenSolid
         case .volumeOn: icons.volumeOnSolid
@@ -202,7 +203,7 @@ public nonisolated struct ElementCallTokenAvatars: ElementCallAvatarRenderingPro
     }
     
     public func avatar(userID: String, displayName: String?, avatarURL: URL?, size: ElementCallAvatarSize) -> AnyView {
-        let diameter: CGFloat = size == .thumbnail ? 52 : 96
+        let diameter: CGFloat = size == .thumbnail ? 52 : 140
         let name = displayName ?? userID
         let initial = name.trimmingCharacters(in: .whitespaces)
             .drop { !$0.isLetter && !$0.isNumber }

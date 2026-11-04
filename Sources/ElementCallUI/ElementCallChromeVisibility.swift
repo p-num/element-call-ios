@@ -40,6 +40,11 @@ struct ElementCallChromeVisibility: Equatable {
         /// Back from Picture in Picture or the minimized bar (R29).
         case restored
         case screenReader(isRunning: Bool)
+        /// A direct call is ringing the other person: the chrome shows, and stays until the pickup,
+        /// so hang up is never out of reach while their phone rings (030 R19).
+        case ringingStarted
+        /// The other person answered, and the call takes its own starting state (030 R19).
+        case pickedUp(isLandscape: Bool)
     }
     
     /// How the chrome slides, and with it whatever the stage pins to the chrome's edge, so the two
@@ -52,6 +57,7 @@ struct ElementCallChromeVisibility: Equatable {
     /// The orientation it was last reset for; nil until the stage first appears.
     private(set) var isLandscape: Bool?
     private(set) var isScreenReaderRunning = false
+    private(set) var isRinging = false
     /// A preview's: the resets are ignored, so the portrait and landscape renders of one preview show
     /// the same state rather than each orientation's starting one.
     private var isPinned = false
@@ -110,6 +116,12 @@ struct ElementCallChromeVisibility: Equatable {
             if isRunning {
                 show()
             }
+        case .ringingStarted:
+            isRinging = true
+            show()
+        case .pickedUp(let isLandscape):
+            isRinging = false
+            reset(isLandscape: isLandscape)
         }
     }
     
@@ -126,9 +138,10 @@ struct ElementCallChromeVisibility: Equatable {
         hiddenBy = nil
     }
     
-    /// Refused while a screen reader runs: a control it cannot see does not exist for it (R24).
+    /// Refused while a screen reader runs: a control it cannot see does not exist for it (R24). And
+    /// while ringing, for 030 R19.
     private mutating func hide(_ reason: Reason) {
-        guard !isScreenReaderRunning else {
+        guard !isScreenReaderRunning, !isRinging else {
             show()
             return
         }

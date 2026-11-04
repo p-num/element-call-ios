@@ -118,6 +118,12 @@ final class ElementCallExampleHost {
             session = Session(fixture: fixture, presentation: .harness(context), controller: controller)
             isHarnessMinimized = fixture.opensMinimized
             
+        case .ringing(let ringing):
+            openRinging(ringing, fixture: fixture)
+            
+        case .played(let scenario):
+            openPlayed(scenario, fixture: fixture)
+            
         case .connecting(let connection):
             let controller = makeController(connection: connection, room: ElementCallFakeRoom())
             // The real host contract, and the only place in this repository it is exercised: the
@@ -147,6 +153,8 @@ final class ElementCallExampleHost {
     /// with it and takes its publisher along, leaving the subscription inert. `open` clears them.
     func endCall() {
         isHarnessMinimized = false
+        ringingTask?.cancel()
+        ringingTask = nil
         if case .scripted(_, let playback)? = session?.presentation {
             Task { await playback.stop() }
         }
@@ -154,6 +162,67 @@ final class ElementCallExampleHost {
     }
     
     // MARK: - Private
+    
+    /// A direct call with Bob whose tiles a scenario plays, on the real screen, as a scenario row is.
+    private func openPlayed(_ text: String, fixture: ElementCallExampleFixture) {
+        do {
+            let playback = try ElementCallExampleScenarioPlayback(scenario: MatrixRTCScenario.parse(text, name: fixture.rawValue),
+                                                                  localMemberID: ElementCallExampleRinging.localMemberID)
+            let room = ElementCallFakeRoom(displayName: "Bob",
+                                           isDirect: true,
+                                           memberProfiles: [ElementCallExampleRinging.callee: ElementCallMemberProfile(userID: ElementCallExampleRinging.callee,
+                                                                                                                       displayName: "Bob",
+                                                                                                                       avatarURL: nil)])
+            let controller = ElementCallController.fake(connection: .connected, room: room, isAudioCall: true, connectedAt: .now, call: playback.player.call)
+            controller.actions
+                .sink { [weak self] action in self?.handle(action) }
+                .store(in: &cancellables)
+            let viewModel = ElementCallScreenViewModel(controller: controller)
+            playback.attach(context: viewModel.context, controller: controller)
+            session = Session(fixture: fixture, presentation: .scripted(viewModel, playback), controller: controller)
+            Task {
+                await playback.start()
+                playback.play()
+            }
+        } catch {
+            notice = "Fixture \(fixture.rawValue) failed to load: \(error)"
+        }
+    }
+    
+    /// Running only while a ringing fixture is up.
+    private var ringingTask: Task<Void, Never>?
+    
+    /// The real controller following a scripted call, beside a scripted media session for the
+    /// tiles, both started at once so the pickup lands on both together.
+    private func openRinging(_ ringing: ElementCallExampleRinging, fixture: ElementCallExampleFixture) {
+        do {
+            let playback = try ElementCallExampleScenarioPlayback(scenario: MatrixRTCScenario.parse(ringing.scenario, name: fixture.rawValue),
+                                                                  localMemberID: ElementCallExampleRinging.localMemberID)
+            let room = ElementCallFakeRoom(displayName: "Bob",
+                                           isDirect: true,
+                                           memberProfiles: [ElementCallExampleRinging.callee: ElementCallMemberProfile(userID: ElementCallExampleRinging.callee,
+                                                                                                                       displayName: "Bob",
+                                                                                                                       avatarURL: nil)])
+            let scripted = MatrixRTCScriptedCall(roomID: room.roomID,
+                                                 status: .calling(callee: ElementCallExampleRinging.callee, ring: .sending, media: .connecting))
+            let controller = ElementCallController.fake(following: scripted.call,
+                                                        room: room,
+                                                        isAudioCall: ringing.isAudioCall,
+                                                        call: playback.player.call)
+            controller.actions
+                .sink { [weak self] action in self?.handle(action) }
+                .store(in: &cancellables)
+            let viewModel = ElementCallScreenViewModel(controller: controller)
+            playback.attach(context: viewModel.context, controller: controller)
+            session = Session(fixture: fixture, presentation: .scripted(viewModel, playback), controller: controller)
+            ringingTask = Task {
+                await playback.start()
+                await ringing.play(on: scripted, tiles: playback)
+            }
+        } catch {
+            notice = "Fixture \(fixture.rawValue) failed to load: \(error)"
+        }
+    }
     
     /// `connectedAt` so the bar draws its duration timer. Nothing else can give it one — only a
     /// joined call sets it otherwise — and the timer is half of what makes the bar look like an

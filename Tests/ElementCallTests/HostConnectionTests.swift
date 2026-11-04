@@ -15,14 +15,14 @@ import Testing
 @MainActor
 struct HostConnectionTests {
     @Test
-    func anUnknownParticipantDoesNotRecoverDegradedMedia() async {
+    func anUnknownParticipantDoesNotRecoverOwnDegradedMedia() async {
         let transport = FakeMediaSession()
         let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport)
         await media.start()
         var events = media.events.makeAsyncIterator()
-        transport.send(.mediaConnectionState(degraded: true))
-        #expect(await events.next() == .mediaConnectionDegraded(true))
-        #expect(media.isMediaDegraded)
+        transport.send(.ownMediaConnectionState(degraded: true))
+        #expect(await events.next() == .ownMediaConnectionDegraded(true))
+        #expect(media.isOwnMediaDegraded)
         
         // A real event behind the diagnostic is a barrier proving the pump has processed it.
         transport.send(.unknownParticipant(identity: "unmatched"))
@@ -32,78 +32,19 @@ struct HostConnectionTests {
         if afterDiagnostic != .handLowered(memberID: "peer") {
             #expect(await events.next() == .handLowered(memberID: "peer"))
         }
-        #expect(media.isMediaDegraded)
+        #expect(media.isOwnMediaDegraded)
         
-        transport.send(.mediaConnectionState(degraded: false))
-        #expect(await events.next() == .mediaConnectionDegraded(false))
-        #expect(!media.isMediaDegraded)
+        transport.send(.ownMediaConnectionState(degraded: false))
+        #expect(await events.next() == .ownMediaConnectionDegraded(false))
+        #expect(!media.isOwnMediaDegraded)
         await media.disconnect()
     }
     
-    @Test
-    func aggregateDegradationKeepsLocalParticipationAndTheOriginalConnectionTime() async throws {
-        let connectedAt = Date(timeIntervalSince1970: 1234)
-        let fixture = Fixture(connection: .connected, connectedAt: connectedAt)
-        await fixture.media.start()
-        fixture.controller.observeMediaSession(fixture.media)
-        
-        // A different participant's SFU can produce these aggregate events too.
-        fixture.transport.send(.mediaConnectionState(degraded: true))
-        try await waitUntil { fixture.media.isMediaDegraded }
-        await drain()
-        #expect(fixture.controller.connection == .connected)
-        #expect(fixture.controller.isInCall)
-        #expect(fixture.controller.call === fixture.media)
-        #expect(fixture.controller.connectedAt == connectedAt)
-        #expect(fixture.system.requests.isEmpty)
-        
-        fixture.transport.send(.mediaConnectionState(degraded: false))
-        try await waitUntil { !fixture.media.isMediaDegraded }
-        await drain()
-        #expect(fixture.controller.connection == .connected)
-        #expect(fixture.controller.connectedAt == connectedAt)
-        #expect(fixture.system.requests.isEmpty)
-        await fixture.media.disconnect()
-    }
-    
-    @Test
-    func anOldMediaPumpCannotEndItsReplacementInTheSameRoom() async throws {
-        let fixture = Fixture(connection: .connected)
-        await fixture.media.start()
-        fixture.controller.observeMediaSession(fixture.media)
-        let replacement = replaceMedia(in: fixture, connection: .connected)
-        
-        fixture.transport.send(.ended(reason: .left))
-        try await waitUntil { fixture.media.hasEnded }
-        await drain()
-        #expect(fixture.controller.call === replacement)
-        #expect(fixture.controller.connection == .connected)
-        #expect(fixture.system.requests.isEmpty)
-        await fixture.media.disconnect()
-        await replacement.disconnect()
-    }
-    
-    @Test
-    func aScheduledMediaEndCannotEndItsReplacementInTheSameRoom() async {
-        let fixture = Fixture(connection: .connected)
-        fixture.controller.handle(.ended(.left), from: fixture.media)
-        // Replace before the separately scheduled teardown task gets an actor turn.
-        let replacement = replaceMedia(in: fixture, connection: .connected)
-        await drain()
-        #expect(fixture.controller.call === replacement)
-        #expect(fixture.controller.connection == .connected)
-        #expect(fixture.system.requests.isEmpty)
-        await fixture.media.disconnect()
-        await replacement.disconnect()
-    }
-    
-    @Test(arguments: [ElementCallConnection.connectingMedia, .ended])
+    @Test(arguments: [ElementCallConnection.connectingMedia, .ended(.left)])
     func startupCompletionCannotReviveAnEndedMediaSession(connection: ElementCallConnection) async {
         let fixture = Fixture(connection: connection)
         await fixture.media.start()
-        var events = fixture.media.events.makeAsyncIterator()
-        fixture.transport.send(.ended(reason: .left))
-        #expect(await events.next() == .ended(.left))
+        await fixture.media.disconnect()
         #expect(fixture.media.hasEnded)
         
         fixture.controller.completeMediaStartup(on: fixture.media, roomID: fixture.room.roomID)
@@ -166,11 +107,11 @@ struct HostConnectionTests {
         }
         defer { fixture.transport.answerPublish() }
         try await waitUntil { fixture.transport.hasPendingPublish }
-        fixture.transport.send(.ended(reason: .left))
-        try await waitUntil { fixture.controller.connection == .ended }
+        fixture.controller.hangUp()
+        try await waitUntil { fixture.controller.connection == .ended(.left) }
         fixture.transport.answerPublish()
         await startup.value
-        #expect(fixture.controller.connection == .ended)
+        #expect(fixture.controller.connection == .ended(.left))
         #expect(fixture.controller.connectedAt == nil)
         #expect(!fixture.system.requests.contains(.connected(roomID: fixture.room.roomID)))
         #expect(fixture.transport.published.allSatisfy { $0.kind == .microphone })
@@ -309,12 +250,12 @@ struct HostConnectionTests {
         fixture.system.send(.endCallRequested(roomID: "!older:example.org"))
         // A following event proves the system publisher was delivered, without racing a timer.
         fixture.system.send(.microphoneMuteChanged(isMuted: true))
-        try await waitUntil { fixture.controller.connection == .ended || fixture.media.isMicrophoneMuted }
+        try await waitUntil { fixture.controller.connection == .ended(.left) || fixture.media.isMicrophoneMuted }
         await drain()
         #expect(fixture.controller.connection == .connected)
         #expect(fixture.controller.call === fixture.media)
         #expect(fixture.media.isMicrophoneMuted)
-        #expect(!fixture.system.requests.contains(.end(roomID: fixture.room.roomID)))
+        #expect(!fixture.system.requests.contains(.end(roomID: fixture.room.roomID, reason: .local)))
         await fixture.media.disconnect()
     }
     
@@ -369,8 +310,8 @@ struct HostConnectionTests {
         fixture.transport.send(.ownMediaConnectionState(degraded: true))
         fixture.transport.send(.ownMediaConnectionState(degraded: true))
         // A separate aggregate event is a barrier behind both duplicate own-media events.
-        fixture.transport.send(.mediaConnectionState(degraded: true))
-        try await waitUntil { fixture.media.isMediaDegraded }
+        await fixture.setAggregateDegraded(true)
+        try await waitUntil { fixture.rtcCall.status.isDegraded }
         await drain()
         #expect(fixture.controller.connection == .connectingMedia)
         #expect(fixture.controller.isInCall)
@@ -380,8 +321,8 @@ struct HostConnectionTests {
         
         fixture.transport.send(.ownMediaConnectionState(degraded: false))
         fixture.transport.send(.ownMediaConnectionState(degraded: false))
-        fixture.transport.send(.mediaConnectionState(degraded: false))
-        try await waitUntil { fixture.controller.connection == .connected && !fixture.media.isMediaDegraded }
+        await fixture.setAggregateDegraded(false)
+        try await waitUntil { fixture.controller.connection == .connected && !fixture.rtcCall.status.isDegraded }
         await drain()
         #expect(fixture.controller.connectedAt == connectedAt)
         #expect(fixture.system.requests == [.disconnected(roomID: fixture.room.roomID),
@@ -397,12 +338,12 @@ struct HostConnectionTests {
         fixture.controller.observeMediaSession(fixture.media)
         fixture.transport.send(.ownMediaConnectionState(degraded: true))
         try await waitUntil { fixture.controller.connection == .connectingMedia }
-        fixture.transport.send(.mediaConnectionState(degraded: true))
-        try await waitUntil { fixture.media.isMediaDegraded }
+        await fixture.setAggregateDegraded(true)
+        try await waitUntil { fixture.rtcCall.status.isDegraded }
         fixture.transport.send(.ownMediaConnectionState(degraded: false))
         try await waitUntil { fixture.controller.connection == .connected }
         #expect(!fixture.media.isOwnMediaDegraded)
-        #expect(fixture.media.isMediaDegraded)
+        #expect(fixture.rtcCall.status.isDegraded)
         #expect(fixture.controller.connectedAt == connectedAt)
         #expect(fixture.system.requests == [.disconnected(roomID: fixture.room.roomID),
                                             .connected(roomID: fixture.room.roomID)])
@@ -422,8 +363,8 @@ struct HostConnectionTests {
                                            connectedAt: connectedAt, call: replacement)
         fixture.transport.send(.ownMediaConnectionState(degraded: true))
         fixture.transport.send(.ownMediaConnectionState(degraded: false))
-        fixture.transport.send(.mediaConnectionState(degraded: true))
-        try await waitUntil { fixture.media.isMediaDegraded }
+        await fixture.setAggregateDegraded(true)
+        try await waitUntil { fixture.rtcCall.status.isDegraded }
         await drain()
         #expect(fixture.controller.call === replacement)
         #expect(fixture.controller.connection == .connected)
@@ -434,15 +375,15 @@ struct HostConnectionTests {
         await replacement.disconnect()
     }
     
-    @Test(arguments: [ElementCallConnection.idle, .joining, .ended, .failed("failed")])
+    @Test(arguments: [ElementCallConnection.idle, .joining, .ended(.left), .failed("failed")])
     func ownMediaEventsCannotConnectAnUnreadyOrTerminalHost(connection: ElementCallConnection) async throws {
         let fixture = Fixture(connection: connection)
         await fixture.media.start()
         fixture.controller.observeMediaSession(fixture.media)
         fixture.transport.send(.ownMediaConnectionState(degraded: true))
         fixture.transport.send(.ownMediaConnectionState(degraded: false))
-        fixture.transport.send(.mediaConnectionState(degraded: true))
-        try await waitUntil { fixture.media.isMediaDegraded }
+        await fixture.setAggregateDegraded(true)
+        try await waitUntil { fixture.rtcCall.status.isDegraded }
         await drain()
         #expect(fixture.controller.connection == connection)
         #expect(fixture.controller.connectedAt == nil)
@@ -476,17 +417,31 @@ struct HostConnectionTests {
         let system = ElementCallFakeSystem()
         let transport: FakeMediaSession
         let media: MatrixRTCMediaSession
-        let rtcCall = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let rtcDriver: FakeRtcCall
+        let rtcCall: MatrixRTCCall
         let controller: ElementCallController
         
         init(connection: ElementCallConnection, connectedAt: Date? = nil,
              isAudioCall: Bool = true, holdingPublish: FfiStreamKind? = nil) {
+            rtcDriver = FakeRtcCall()
+            rtcCall = MatrixRTCCall(rtcCall: rtcDriver)
+            rtcCall.start()
             transport = FakeMediaSession(holdingPublish: holdingPublish)
             media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
             controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport()),
                                                system: system, options: .init(), style: .stock, logger: nil)
             controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                        room: room, connection: connection, connectedAt: connectedAt, call: media, rtcCall: rtcCall)
+        }
+        
+        func setAggregateDegraded(_ degraded: Bool) async {
+            rtcDriver.statusSubscription.push(.connected(sinceMs: 0, degraded: degraded))
+            for _ in 0..<1000 {
+                if rtcCall.status.isDegraded == degraded {
+                    return
+                }
+                await Task.yield()
+            }
         }
     }
     

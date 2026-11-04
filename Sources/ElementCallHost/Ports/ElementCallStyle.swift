@@ -5,6 +5,7 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
+import CompoundDesignTokens
 import SwiftUI
 
 // MARK: - Theme
@@ -53,6 +54,12 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     
     /// The ring round a tile whose member has a hand up, the same way.
     @MainActor func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle]
+    
+    /// The waves round a one-to-one call's avatar while the other person speaks, innermost first:
+    /// where a card has its speaking ring on its edge, a picture filling the screen has none.
+    @MainActor var soundWaveFills: [Color] { get }
+    /// The edge of each wave.
+    @MainActor var soundWaveEdge: Color { get }
 }
 
 public extension ElementCallThemeProtocol {
@@ -64,6 +71,15 @@ public extension ElementCallThemeProtocol {
     
     @MainActor func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle] {
         ElementCallBorderGradient.raisedHand.layers(in: size)
+    }
+    
+    /// Element Call web's: the dark theme's translucent greys, since the call screen is always dark.
+    @MainActor var soundWaveFills: [Color] {
+        [CompoundCoreColorTokens.alphaGray400, CompoundCoreColorTokens.alphaGray300, CompoundCoreColorTokens.alphaGray200]
+    }
+    
+    @MainActor var soundWaveEdge: Color {
+        CompoundCoreColorTokens.alphaGray300
     }
 }
 
@@ -124,6 +140,8 @@ public nonisolated enum ElementCallIcon: Sendable, CaseIterable {
     case micOff
     case videoCall
     case videoCallOff
+    /// Beside "Calling…" in a voice call, where a video call shows ``videoCall``.
+    case voiceCall
     case switchCamera
     case shareScreen
     case volumeOn
@@ -163,8 +181,9 @@ public extension ElementCallIconRenderingProtocol {
 public nonisolated enum ElementCallAvatarSize: Sendable {
     /// Not requested by the built-in stage.
     case thumbnail
-    /// Every tile, and the Picture in Picture placeholder. A grid tile draws it scaled down to
-    /// 52 pt, so it grows into the spotlight or full screen as one picture.
+    /// Every tile, and the Picture in Picture placeholder. The stage scales it to 140 pt on a large
+    /// tile and 52 pt in the grid, so it grows from one to the other as one picture. Render it at
+    /// 140 pt, or a photo is drawn larger than it was loaded.
     case full
 }
 

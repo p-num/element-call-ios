@@ -44,7 +44,10 @@ public protocol ElementCallRoomContextProtocol: AnyObject {
 /// called are read from the ``ElementCallRoomContextProtocol`` instead, because both can change mid-call.
 public nonisolated struct ElementCallData: Sendable, Equatable {
     public let isAudioCall: Bool
-    /// Whether this device is starting the call, which rings the room, or joining one already running.
+    /// Whether the user chose to call, as opposed to answering a ring or joining a call in progress.
+    /// It decides whether a direct chat rings, so it comes from what the user did, never from the
+    /// room having no call yet: answering a ring just after the caller gave up finds no call, and
+    /// would ring them back rather than end (030 R33).
     public let isStartingCall: Bool
     
     public init(isAudioCall: Bool, isStartingCall: Bool) {

@@ -124,6 +124,19 @@ public enum ElementCallPreviewFixtures {
         return state
     }
     
+    /// A direct call ringing Bob (030). He is not a tile, having not joined: the screen draws his
+    /// avatar from his profile, with our own tile over it once our media is up.
+    public static func ringing(isAudioCall: Bool = false, isMediaUp: Bool = true) -> ElementCallScreenViewState {
+        let own = tile("Alice", isLocal: true, hasVideo: !isAudioCall)
+        var state = connected(tiles: isMediaUp ? [own] : [], isDirect: true)
+        state.roomName = "Bob"
+        state.connection = .calling(callee: bob.userID, ring: .ringing(sentAt: .distantPast, lifetime: .seconds(90)))
+        state.callee = ElementCallMemberProfile(userID: bob.userID, displayName: "Bob", avatarURL: nil)
+        state.isAudioCall = isAudioCall
+        state.isCameraEnabled = !isAudioCall
+        return state
+    }
+    
     /// An iPhone with nothing plugged in or paired: the control bar's audio button is a toggle.
     public static let phoneAudioOutputs: [CallAudioOutput] = [.receiver, .speaker]
     /// AirPods connected: the button is a menu, and the call starts in the AirPods.

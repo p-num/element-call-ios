@@ -38,9 +38,9 @@ final nonisolated class WidgetCapabilityGrant: WidgetCapabilitiesProvider, Senda
     static let roomEventTypes = ["org.matrix.msc4075.call.notify",
                                  "org.matrix.msc4310.rtc.notification",
                                  "m.rtc.notification"] + MatrixRTCEventTypes.reactions
-    /// Received from the timeline: other members' reactions and raised hands, and the redactions
-    /// that lower a hand.
-    static let receivedRoomEventTypes = MatrixRTCEventTypes.reactions + [MatrixRTCEventTypes.redaction]
+    /// Received from the timeline: other members' reactions and raised hands, the redactions that
+    /// lower a hand, and the callee declining our ring, which ends a DM call.
+    static let receivedRoomEventTypes = MatrixRTCEventTypes.reactions + [MatrixRTCEventTypes.redaction] + MatrixRTCEventTypes.decline
     
     /// MSC2762 / MSC3819 / MSC4157 capability strings for the same set.
     static let capabilityStrings: [String] =
@@ -65,6 +65,11 @@ final nonisolated class WidgetCapabilityGrant: WidgetCapabilitiesProvider, Senda
                                   updateDelayedEvent: true,
                                   sendDelayedEvent: true,
                                   downloadFiles: false,
-                                  rtcTransports: true)
+                                  rtcTransports: true,
+                                  // MSC4533's homeserver-side LiveKit token and delayed leave. The
+                                  // core gets its token from the focus's own service with an OpenID
+                                  // token, and keeps the delayed leave itself.
+                                  rtcLivekitGetToken: false,
+                                  rtcLivekitDelegateDelayedLeave: false)
     }
 }

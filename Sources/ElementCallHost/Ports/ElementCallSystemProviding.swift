@@ -20,6 +20,19 @@ public nonisolated enum ElementCallSystemEvent: Sendable {
     case endCallRequested(roomID: String)
 }
 
+/// Why a call ended, in the system call UI's terms: CallKit's `CXCallEndedReason`, plus our own
+/// hang-up, which CallKit hears as an end-call action rather than a report.
+public nonisolated enum ElementCallEndReason: Sendable, Equatable {
+    /// We hung up, or the system did for us.
+    case local
+    /// The other side ended it: they declined, they left, or the call was closed under us.
+    case remoteEnded
+    /// Nobody answered before the ring ran out.
+    case unanswered
+    /// It could not go on: the ring could not be sent, the connection went, or the join failed.
+    case failed
+}
+
 /// The system call integration, implemented by the host over CallKit.
 ///
 /// This stays with the host because a CallKit provider is process-wide and usually shared with a
@@ -39,7 +52,9 @@ public protocol ElementCallSystemProvidingProtocol: AnyObject {
     func reportConnected(roomID: String)
     /// Our publishing media is reconnecting; keep the same system call alive.
     func reportDisconnected(roomID: String)
-    func endCall(roomID: String)
+    /// Only ``ElementCallEndReason/local`` is ours to end: the system should hear every other reason
+    /// as the call ending on its own, not as us hanging up (spec 030 R32).
+    func endCall(roomID: String, reason: ElementCallEndReason)
     /// Mirrors our mute state into the system call UI.
     func setMicrophoneEnabled(_ enabled: Bool, roomID: String)
     

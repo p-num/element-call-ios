@@ -136,6 +136,10 @@ public nonisolated struct ElementCallStrings: Sendable {
     public var callJoinFailed: String
     public var callMediaFailed: String
     public var microphoneStartFailed: String
+    /// Beneath the room's name while a direct call rings the other person.
+    public var calling: String
+    /// What a screen reader says for the ringing avatar, given the callee's name.
+    public var callingPerson: @Sendable (String) -> String
     
     public init(you: String = "You",
                 error: String = "Error",
@@ -147,7 +151,9 @@ public nonisolated struct ElementCallStrings: Sendable {
                 callPreparationFailed: String = "This conversation could not be prepared for a call. Please try again.",
                 callJoinFailed: String = "The call could not be joined. Please try again.",
                 callMediaFailed: String = "The call could not connect. Please try again.",
-                microphoneStartFailed: String = "The microphone could not start. Please try again.") {
+                microphoneStartFailed: String = "The microphone could not start. Please try again.",
+                calling: String = "Calling\u{2026}",
+                callingPerson: @escaping @Sendable (String) -> String = { "Calling \($0)" }) {
         self.you = you
         self.error = error
         self.stop = stop
@@ -159,5 +165,7 @@ public nonisolated struct ElementCallStrings: Sendable {
         self.callJoinFailed = callJoinFailed
         self.callMediaFailed = callMediaFailed
         self.microphoneStartFailed = microphoneStartFailed
+        self.calling = calling
+        self.callingPerson = callingPerson
     }
 }

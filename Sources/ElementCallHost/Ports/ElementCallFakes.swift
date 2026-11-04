@@ -127,7 +127,7 @@ public final class ElementCallFakeSystem: ElementCallSystemProvidingProtocol {
         case start(roomID: String, displayName: String, isVideo: Bool)
         case connected(roomID: String)
         case disconnected(roomID: String)
-        case end(roomID: String)
+        case end(roomID: String, reason: ElementCallEndReason)
         case microphone(enabled: Bool, roomID: String)
     }
     
@@ -156,8 +156,8 @@ public final class ElementCallFakeSystem: ElementCallSystemProvidingProtocol {
         requests.append(.disconnected(roomID: roomID))
     }
     
-    public func endCall(roomID: String) {
-        requests.append(.end(roomID: roomID))
+    public func endCall(roomID: String, reason: ElementCallEndReason) {
+        requests.append(.end(roomID: roomID, reason: reason))
     }
     
     public func setMicrophoneEnabled(_ enabled: Bool, roomID: String) {
@@ -245,6 +245,42 @@ public extension ElementCallController {
                                    connection: connection,
                                    connectedAt: connectedAt,
                                    call: call)
+        return controller
+    }
+    
+    /// The example harness only: a controller in a call whose status a `MatrixRTCScriptedCall`
+    /// plays, followed exactly as a joined call is, so the screen, the sounds and the end of the
+    /// call are the shipping ones. `call` is the scripted media session that supplies the tiles.
+    ///
+    /// There is no CallKit here to activate the audio session, so this does, on a device too: the
+    /// ringback and the end sounds are what the harness is for.
+    static func fake(following rtcCall: MatrixRTCCall,
+                     room: any ElementCallRoomContextProtocol,
+                     isAudioCall: Bool,
+                     call: MatrixRTCMediaSession?) -> ElementCallController {
+        let controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport()),
+                                               system: ElementCallFakeSystem(),
+                                               options: ElementCallOptions(isDeveloperModeEnabled: true),
+                                               style: .stock,
+                                               logger: nil)
+        controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
+                                   room: room,
+                                   connection: .joining,
+                                   call: call,
+                                   rtcCall: rtcCall)
+        controller.follow(rtcCall, roomID: room.roomID)
+        // What `publishMedia` does once a joined call's media is up, which this never reaches: a
+        // video call starts with the camera on.
+        if !isAudioCall, let call {
+            Task { try? await call.setCameraEnabled(true) }
+        }
+        do {
+            try CallAudioSessionConfigurator.configure()
+            try CallAudioSessionConfigurator.activate()
+            controller.audioSessionDidActivate()
+        } catch {
+            controller.errorMessage = "Could not activate the audio session: \(error)"
+        }
         return controller
     }
 }

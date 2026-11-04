@@ -288,6 +288,12 @@ public final class ElementCallScreenViewModel {
     private func refresh() {
         var state = context.viewState
         state.connection = controller.connection
+        state.isAudioCall = controller.callData?.isAudioCall ?? false
+        state.callee = if case .calling(let callee, _) = controller.connection {
+            profiles[callee] ?? ElementCallMemberProfile(userID: callee, displayName: nil, avatarURL: nil)
+        } else {
+            nil
+        }
         state.connectedAt = controller.connectedAt
         state.audioOutputs = controller.audioOutputs
         state.audioOutput = controller.audioOutput
@@ -334,7 +340,7 @@ public final class ElementCallScreenViewModel {
         call.setRankingThreshold(ElementCallSmallCallLayout.rankingThreshold)
         state.isFrontCamera = call.isFrontCamera
         state.isScreenSharing = call.isScreenSharing
-        state.isMediaDegraded = call.isMediaDegraded
+        state.isMediaDegraded = controller.rtcCall?.status.isDegraded ?? false
         
         state.tiles = Self.tiles(roster: call.tiles,
                                  own: call.ownTile,

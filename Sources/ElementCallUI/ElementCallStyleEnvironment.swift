@@ -42,6 +42,10 @@ public extension EnvironmentValues {
     /// glass in a landscape frame comes out blank and a reference of the flat fallback at least
     /// says where the buttons are. Glass itself is checked on a device.
     @Entry var elementCallGlassEnabled = true
+    /// Whether a one-to-one call's sound waves ripple. On in every shipping build; the snapshot
+    /// harness turns it off, because a single frame of ripples is the first one still under the
+    /// speaking ring, and the still waves at least show the speaking state.
+    @Entry var elementCallSoundWavesRipple = true
     /// How long after the user stops scrolling the chrome a scroll hid comes back (017 R20). The
     /// default in every shipping build; the example harness lengthens it for its UI tests, which
     /// check the chrome is away after a scroll and on a slow CI runner did not get to look within

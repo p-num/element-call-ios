@@ -42,10 +42,15 @@ enum ElementCallExampleFixture: String, CaseIterable {
     case smallThree = "small_three"
     case smallFour = "small_four"
     case smallFive = "small_five"
+    case oneToOneSpeaking = "one_to_one_speaking"
     case joining
     case connectingMedia = "connecting_media"
     case failed
     case ended
+    case ringingPickup = "ringing_pickup"
+    case ringingVoicePickup = "ringing_voice_pickup"
+    case ringingDeclined = "ringing_declined"
+    case ringingUnanswered = "ringing_unanswered"
     
     /// `-fixture <key>` opens a fixture and `-scenario <name>` a scenario file, mirroring Android's
     /// `--es fixture` and `--es scenario` so one recipe reads the same on both.
@@ -57,11 +62,13 @@ enum ElementCallExampleFixture: String, CaseIterable {
     enum Category: String, CaseIterable {
         case connected = "Connected"
         case connecting = "Connecting"
+        case ringing = "Ringing"
     }
     
     var category: Category {
         switch self {
         case .joining, .connectingMedia, .failed, .ended: .connecting
+        case .ringingPickup, .ringingVoicePickup, .ringingDeclined, .ringingUnanswered: .ringing
         default: .connected
         }
     }
@@ -88,6 +95,11 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallThree: "Small call of three"
         case .smallFour: "Small call of four"
         case .smallFive: "Small call of five"
+        case .oneToOneSpeaking: "One to one, speaking"
+        case .ringingPickup: "Ringing, then picked up"
+        case .ringingVoicePickup: "Ringing a voice call, then picked up"
+        case .ringingDeclined: "Ringing, then declined"
+        case .ringingUnanswered: "Ringing, unanswered"
         case .joining: "Joining"
         case .connectingMedia: "Connecting media"
         case .failed: "Failed"
@@ -115,6 +127,11 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallThree: "Three stacked rows, ours first; one row in landscape."
         case .smallFour: "Two by two, Carol speaking; Dan's camera off. Three hands up, ours included."
         case .smallFive: "Two rows of two and one centred; two rows in landscape."
+        case .oneToOneSpeaking: "A voice call: the sound waves come and go round Bob's avatar as he speaks."
+        case .ringingPickup: "The ringing screen and ringback; Bob answers with video at 6 s."
+        case .ringingVoicePickup: "A voice call ringing; Bob answers without video at 6 s."
+        case .ringingDeclined: "Bob declines at 6 s: the screen closes and the decline sound plays out."
+        case .ringingUnanswered: "The ring runs out at 6 s: the screen closes and the timeout sound plays out."
         case .joining: "Before there is a call to render."
         case .connectingMedia: "Joined, waiting on media."
         case .failed: "The error the screen shows once and clears."
@@ -134,6 +151,10 @@ enum ElementCallExampleFixture: String, CaseIterable {
     enum Kind {
         case connected(ElementCallScreenViewState)
         case connecting(ElementCallConnection)
+        /// A direct call to Bob played on a scripted call: the real controller, screen and sounds.
+        case ringing(ElementCallExampleRinging)
+        /// A direct call whose tiles change over time, played from an inline scenario.
+        case played(scenario: String)
     }
     
     /// Built from the same fixtures the snapshots use, so a failure here and a failure there are
@@ -218,6 +239,18 @@ enum ElementCallExampleFixture: String, CaseIterable {
                                    Fixtures.tile("Dan", handPosition: 2)])
         case .smallFive:
             return Self.connected([me] + [("Carol", true), ("Bob", true), ("Dan", false), ("Erin", true)].map { Fixtures.tile($0, hasVideo: $1) })
+        case .oneToOneSpeaking:
+            // Speaking for 2 s in every 3, for half a minute. `BOB` is `@bob:example.com`.
+            let frames = stride(from: 0, to: 30, by: 3).flatMap { second in ["\(second)s BOB", "\(second + 1)s BOB!"] }
+            return .played(scenario: frames.joined(separator: "\n"))
+        case .ringingPickup:
+            return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .pickUp))
+        case .ringingVoicePickup:
+            return .ringing(ElementCallExampleRinging(isAudioCall: true, outcome: .pickUp))
+        case .ringingDeclined:
+            return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .declined))
+        case .ringingUnanswered:
+            return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .unanswered))
         case .joining:
             return .connecting(.joining)
         case .connectingMedia:
@@ -225,7 +258,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .failed:
             return .connecting(.failed("Homeserver offers no LiveKit transport"))
         case .ended:
-            return .connecting(.ended)
+            return .connecting(.ended(.left))
         }
     }
     

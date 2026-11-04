@@ -282,14 +282,15 @@ struct ElementCallStageLayoutTests {
     func everyTileIsEitherPlacedOrNamedHidden() {
         let share = Self.share("bob")
         let tiles = [local, share, bob, carol] + Self.members(30)
-        let arrangements = [compute(tiles, spotlight: share.id),
-                            compute(tiles, spotlight: share.id, offset: 1500),
-                            compute(tiles, spotlight: share.id, fullscreen: share.id),
-                            compute(tiles, metrics: landscape),
-                            compute([local, bob])]
-        for layout in arrangements {
+        // The last is a one-to-one call with our camera off, whose floating tile is hidden.
+        let arrangements = [(tiles, compute(tiles, spotlight: share.id)),
+                            (tiles, compute(tiles, spotlight: share.id, offset: 1500)),
+                            (tiles, compute(tiles, spotlight: share.id, fullscreen: share.id)),
+                            (tiles, compute(tiles, metrics: landscape)),
+                            ([local, bob], compute([local, bob]))]
+        for (given, layout) in arrangements {
             let accounted = Set(layout.placements.map(\.id)).union(layout.hiddenTileIDs)
-            #expect(accounted == Set(layout.placements.isEmpty ? [] : (layout.placements.count == 2 ? [local.id, bob.id] : tiles.map(\.id))))
+            #expect(accounted == Set(given.map(\.id)))
         }
     }
     

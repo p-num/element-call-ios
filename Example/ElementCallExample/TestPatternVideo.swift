@@ -47,7 +47,8 @@ final class TestPatternVideo: Sendable {
     private let queue = DispatchQueue(label: "io.element.call.example.test-pattern", qos: .userInitiated)
     
     /// Landscape unless the member is one of these, so both shapes are on the stage at once.
-    private static let portraitMembers = ["@bob:example.com:DEVICE", "@erin:example.com:DEVICE"]
+    /// Compared without case: a scenario names Bob `BOB`, whose member ID keeps the capitals.
+    private static let portraitMembers = ["@bob:example.com:device", "@erin:example.com:device"]
     /// Ourselves, Alice in every fixture. Our picture is upright in the interface orientation, as a
     /// real front camera's is, so it is portrait on an upright phone and landscape on its side: the
     /// floating tile takes that shape (019 R10, R29), and with a fixed shape the harness only ever
@@ -78,7 +79,7 @@ final class TestPatternVideo: Sendable {
         if memberID == ownMemberID {
             return isLandscape ? landscape : portrait
         }
-        return portraitMembers.contains(memberID) ? portrait : landscape
+        return portraitMembers.contains(memberID.lowercased()) ? portrait : landscape
     }
     
     private func attach(_ slot: VideoFrameSlot, memberID: String) {

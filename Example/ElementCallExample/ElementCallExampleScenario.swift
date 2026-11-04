@@ -57,9 +57,11 @@ final class ElementCallExampleScenarioPlayback {
     private weak var context: ElementCallScreenContext?
     private weak var controller: ElementCallController?
     
-    init(scenario: MatrixRTCScenario) {
+    /// `localMemberID` is the player's own unless given: the ringing fixtures are Alice, whom the
+    /// test pattern draws as a camera, upright in the phone's orientation.
+    init(scenario: MatrixRTCScenario, localMemberID: String? = nil) {
         self.scenario = scenario
-        player = MatrixRTCScenarioPlayer(scenario: scenario)
+        player = localMemberID.map { MatrixRTCScenarioPlayer(scenario: scenario, localMemberID: $0) } ?? MatrixRTCScenarioPlayer(scenario: scenario)
     }
     
     func attach(context: ElementCallScreenContext, controller: ElementCallController) {
