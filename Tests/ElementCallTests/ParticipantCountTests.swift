@@ -14,7 +14,7 @@ import Testing
 struct ParticipantCountTests {
     @Test(arguments: ["me", "peer"])
     func theScreenCountsThreePeopleAcrossFourDevices(duplicateUser: String) async throws {
-        let call = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let call = MatrixRTCCall(rtcCall: FakeRTCCall())
         let people = [member("me"), member("peer"), member("third")]
         call.updateMembers(people + [member(duplicateUser, device: "two")])
         let controller = ElementCallController.fake(connection: .connected)

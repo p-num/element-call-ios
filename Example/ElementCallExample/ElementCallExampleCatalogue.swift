@@ -21,7 +21,6 @@ struct ElementCallExampleCatalogue: View {
     var returningTo: String?
     let onPick: (ElementCallExampleFixture) -> Void
     let onPickScenario: (ElementCallExampleScenario) -> Void
-    
     /// Each row's identifier, which is also its scroll identity.
     static func rowID(_ fixture: ElementCallExampleFixture) -> String {
         "example.fixture.\(fixture.rawValue)"

@@ -214,8 +214,8 @@ private extension PreviewDevice {
     }
 }
 
+@MainActor
 private extension Snapshotting where Value: SwiftUI.View, Format == UIImage {
-    @MainActor
     static func prefireImage(drawHierarchyInKeyWindow: Bool = false,
                              preferences: SnapshotPreferences,
                              layout: SwiftUISnapshotLayout = .sizeThatFits,

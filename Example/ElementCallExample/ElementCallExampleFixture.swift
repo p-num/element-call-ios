@@ -43,6 +43,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
     case smallFour = "small_four"
     case smallFive = "small_five"
     case oneToOneSpeaking = "one_to_one_speaking"
+    case reactions
     case joining
     case connectingMedia = "connecting_media"
     case failed
@@ -51,6 +52,15 @@ enum ElementCallExampleFixture: String, CaseIterable {
     case ringingVoicePickup = "ringing_voice_pickup"
     case ringingDeclined = "ringing_declined"
     case ringingUnanswered = "ringing_unanswered"
+    // The core's own fixture keys for the same outages (034 C16), so one key names one outage in
+    // the core's tests and on both phones.
+    case outageHomeserver30s = "outage.homeserver.30s"
+    case outageHomeserverLapse = "outage.homeserver.lapse"
+    case outageOwnSFURecovers40s = "outage.own_sfu.recovers_40s"
+    case outageOwnSFUBudget = "outage.own_sfu.budget"
+    case outagePeerSFU1m = "outage.peer_sfu.1m"
+    case outageKeyUndeliveredThenDelivered = "outage.key.undelivered_then_delivered"
+    case outageKeyMissing = "outage.key.missing"
     
     /// `-fixture <key>` opens a fixture and `-scenario <name>` a scenario file, mirroring Android's
     /// `--es fixture` and `--es scenario` so one recipe reads the same on both.
@@ -63,12 +73,15 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case connected = "Connected"
         case connecting = "Connecting"
         case ringing = "Ringing"
+        case outages = "Outages"
     }
     
     var category: Category {
         switch self {
         case .joining, .connectingMedia, .failed, .ended: .connecting
         case .ringingPickup, .ringingVoicePickup, .ringingDeclined, .ringingUnanswered: .ringing
+        case .outageHomeserver30s, .outageHomeserverLapse, .outageOwnSFURecovers40s, .outageOwnSFUBudget, .outagePeerSFU1m,
+             .outageKeyUndeliveredThenDelivered, .outageKeyMissing: .outages
         default: .connected
         }
     }
@@ -96,6 +109,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallFour: "Small call of four"
         case .smallFive: "Small call of five"
         case .oneToOneSpeaking: "One to one, speaking"
+        case .reactions: "Reactions"
         case .ringingPickup: "Ringing, then picked up"
         case .ringingVoicePickup: "Ringing a voice call, then picked up"
         case .ringingDeclined: "Ringing, then declined"
@@ -104,6 +118,13 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .connectingMedia: "Connecting media"
         case .failed: "Failed"
         case .ended: "Ended"
+        case .outageHomeserver30s: "Homeserver away for 30 s"
+        case .outageHomeserverLapse: "Homeserver away, membership lapsed"
+        case .outageOwnSFURecovers40s: "Our media server back after 40 s"
+        case .outageOwnSFUBudget: "Our media server never back"
+        case .outagePeerSFU1m: "Carol and Bob's media server away for 1 min"
+        case .outageKeyUndeliveredThenDelivered: "Erin's key late, then delivered"
+        case .outageKeyMissing: "Erin's key never arrives"
         }
     }
     
@@ -128,14 +149,22 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallFour: "Two by two, Carol speaking; Dan's camera off. Three hands up, ours included."
         case .smallFive: "Two rows of two and one centred; two rows in landscape."
         case .oneToOneSpeaking: "A voice call: the sound waves come and go round Bob's avatar as he speaks."
+        case .reactions: "Reactions rising and sounding on a loop, then four claps at once; -reactionInterval for a stream."
         case .ringingPickup: "The ringing screen and ringback; Bob answers with video at 6 s."
         case .ringingVoicePickup: "A voice call ringing; Bob answers without video at 6 s."
         case .ringingDeclined: "Bob declines at 6 s: the screen closes and the decline sound plays out."
         case .ringingUnanswered: "The ring runs out at 6 s: the screen closes and the timeout sound plays out."
         case .joining: "Before there is a call to render."
         case .connectingMedia: "Joined, waiting on media."
-        case .failed: "The error the screen shows once and clears."
+        case .failed: "Why the call failed, until the user closes the screen."
         case .ended: "After hanging up, before the screen goes away."
+        case .outageHomeserver30s: "From 5 s: the server entry, the hand disabled, everyone still in the call."
+        case .outageHomeserverLapse: "From 15 s the others cannot see or hear us; back at 45 s, republished at 48 s."
+        case .outageOwnSFURecovers40s: "From 5 s: our tile's spinner and sharing disabled, until 45 s."
+        case .outageOwnSFUBudget: "From 5 s our media reconnects; at 15 s the call fails and says why."
+        case .outagePeerSFU1m: "From 5 s Carol and Bob are avatars with a spinner, until 65 s."
+        case .outageKeyUndeliveredThenDelivered: "From 5 s Erin's key is missing, until 12 s: her spinner, and no indicator."
+        case .outageKeyMissing: "From 5 s Erin's key is missing: her spinner, the key-off icon from 15 s, and no indicator."
         }
     }
     
@@ -155,6 +184,10 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case ringing(ElementCallExampleRinging)
         /// A direct call whose tiles change over time, played from an inline scenario.
         case played(scenario: String)
+        /// A group call on a scripted call, with the core's interruptions played over it.
+        case outage(ElementCallExampleOutage)
+        /// A small call on a scripted call, with reactions arriving on a loop.
+        case reactions(ElementCallExampleReactions)
     }
     
     /// Built from the same fixtures the snapshots use, so a failure here and a failure there are
@@ -243,6 +276,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
             // Speaking for 2 s in every 3, for half a minute. `BOB` is `@bob:example.com`.
             let frames = stride(from: 0, to: 30, by: 3).flatMap { second in ["\(second)s BOB", "\(second + 1)s BOB!"] }
             return .played(scenario: frames.joined(separator: "\n"))
+        case .reactions:
+            return .reactions(ElementCallExampleReactions())
         case .ringingPickup:
             return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .pickUp))
         case .ringingVoicePickup:
@@ -251,12 +286,26 @@ enum ElementCallExampleFixture: String, CaseIterable {
             return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .declined))
         case .ringingUnanswered:
             return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .unanswered))
+        case .outageHomeserver30s:
+            return .outage(.homeserver30s)
+        case .outageHomeserverLapse:
+            return .outage(.homeserverLapse)
+        case .outageOwnSFURecovers40s:
+            return .outage(.ownSFURecovers40s)
+        case .outageOwnSFUBudget:
+            return .outage(.ownSFUBudget)
+        case .outagePeerSFU1m:
+            return .outage(.peerSFU1m)
+        case .outageKeyUndeliveredThenDelivered:
+            return .outage(.keyUndeliveredThenDelivered)
+        case .outageKeyMissing:
+            return .outage(.keyMissing)
         case .joining:
             return .connecting(.joining)
         case .connectingMedia:
             return .connecting(.connectingMedia)
         case .failed:
-            return .connecting(.failed("Homeserver offers no LiveKit transport"))
+            return .connecting(.failed(.other("Homeserver offers no LiveKit transport")))
         case .ended:
             return .connecting(.ended(.left))
         }
@@ -282,6 +331,8 @@ enum ElementCallExampleLaunchTarget {
     case fixture(ElementCallExampleFixture)
     /// A scenario file by name, `-scenario 002_listen_mode`.
     case scenario(ElementCallExampleScenario)
+    /// A real call in the lab, `-lab elementcall-lab://join?...` (`ElementCallExampleLabJoin`).
+    case lab(ElementCallExampleLabJoin)
     /// A flag was passed with something it does not name. Deliberately not folded into
     /// ``catalogue``: the old behaviour was to quietly substitute `.group`, so a misspelt fixture
     /// ran the strip tests against an eight-person stage and failed with "this tile is not
@@ -300,6 +351,11 @@ enum ElementCallExampleLaunchTarget {
             let name = arguments[safe: index + 1] ?? ""
             return ElementCallExampleScenario.named(name).map { .scenario($0) }
                 ?? .unknown(flag: ElementCallExampleFixture.scenarioLaunchArgument, name: name)
+        }
+        if let index = arguments.firstIndex(of: ElementCallExampleLabJoin.launchArgument) {
+            let name = arguments[safe: index + 1] ?? ""
+            return URL(string: name).flatMap(ElementCallExampleLabJoin.init(url:)).map { .lab($0) }
+                ?? .unknown(flag: ElementCallExampleLabJoin.launchArgument, name: name)
         }
         return .catalogue
     }

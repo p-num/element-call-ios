@@ -20,6 +20,11 @@ final class CallAudio {
     private var soundEffects: CallSoundEffectRenderer?
     private var isRingbackWanted = false
     private var installation: Task<Void, Never>?
+    /// Wanted once the call plays reaction sounds, and kept for the rest of the call after that.
+    private var reactionSounds: CallSoundEffectRenderer.ReactionSounds?
+    private var reactionDecoding: Task<Void, Never>?
+    /// Kept, so sounds decoded after it was set still play at it.
+    private var effectsGain = CallSoundEffectRenderer.gain
     
     /// The bundled sounds, decoded off this actor, unless a test hands over sounds of known length.
     init(soundEffects: CallSoundEffectRenderer? = nil) {
@@ -43,6 +48,29 @@ final class CallAudio {
         soundEffects?.play(sound)
     }
     
+    /// Decodes the reaction sounds, off this actor, the first time a call wants them. They are
+    /// several megabytes, so a call with reaction sounds off never decodes them.
+    func prepareReactionSounds() {
+        guard reactionSounds == nil, reactionDecoding == nil else { return }
+        reactionDecoding = Task { [weak self] in
+            let sounds = await Task.detached(priority: .utility) { await CallSoundEffectRenderer.decodeReactionSounds() }.value
+            guard let self, let sounds, !Task.isCancelled else { return }
+            reactionSounds = sounds
+            soundEffects?.installReactionSounds(sounds)
+        }
+    }
+    
+    /// The user's sound effects volume, 0 to 1 of the call's level (037 R22).
+    func setEffectsGain(_ gain: Float) {
+        effectsGain = gain
+        soundEffects?.setEffectsGain(gain)
+    }
+    
+    /// Nothing until ``prepareReactionSounds()`` has finished.
+    func playReaction(_ sound: String) {
+        soundEffects?.playReaction(sound)
+    }
+    
     /// Kept as wanted rather than played, so a ring that goes out before the sounds are decoded is
     /// still heard once they are.
     func setRingback(_ isPlaying: Bool) {
@@ -59,6 +87,7 @@ final class CallAudio {
     /// The end of the call's audio, and of its engine.
     func shutdown() {
         installation?.cancel()
+        reactionDecoding?.cancel()
         soundEffects?.stop(.ringback)
         engine.shutdown()
     }
@@ -71,6 +100,10 @@ final class CallAudio {
     
     private func install(_ renderer: CallSoundEffectRenderer) {
         soundEffects = renderer
+        renderer.setEffectsGain(effectsGain)
+        if let reactionSounds {
+            renderer.installReactionSounds(reactionSounds)
+        }
         engine.setSoundEffectSource(render: renderer.renderBlock)
         applyRingback()
     }

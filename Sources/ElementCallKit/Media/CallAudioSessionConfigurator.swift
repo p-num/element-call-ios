@@ -11,14 +11,32 @@ import AVFoundation
 /// CallKit activates the session and reports it through `didActivate`, and activating it ourselves
 /// makes that callback fire twice or not at all.
 public nonisolated enum CallAudioSessionConfigurator {
-    /// No `.defaultToSpeaker` here on purpose: with it, clearing the output override still lands on
-    /// the speaker and the earpiece becomes unreachable. Video calls ask for the speaker explicitly
-    /// once the session is active (`setLoudspeaker`).
+    private static let relevantOptions: AVAudioSession.CategoryOptions =
+        [.allowBluetoothHFP, .allowBluetoothA2DP, .defaultToSpeaker, .mixWithOthers, .duckOthers]
+    
+    /// Category, then mode, in two calls, as Speakerbox and WebRTC do. Developers report that setting
+    /// both at once (`setCategory(_:mode:options:)`) makes the CallKit speaker button flip back to off
+    /// while audio stays on the speaker.
+    ///
+    /// No options, like Apple's Speakerbox. `.defaultToSpeaker` makes the earpiece unreachable;
+    /// `.allowBluetoothHFP` also makes the speaker button flip back. Bluetooth still works, CallKit
+    /// offers those routes during a call.
+    ///
+    /// Only what differs is set, so calling this twice is harmless.
     public static func configure() throws {
         let session = AVAudioSession.sharedInstance()
-        try session.setCategory(.playAndRecord, mode: .voiceChat, options: [.allowBluetoothHFP])
-        try session.setPreferredSampleRate(Double(AudioFormat.sampleRate))
-        try session.setPreferredIOBufferDuration(0.01)
+        if session.category != .playAndRecord || !session.categoryOptions.isDisjoint(with: relevantOptions) {
+            try session.setCategory(.playAndRecord, options: [])
+        }
+        if session.mode != .voiceChat {
+            try session.setMode(.voiceChat)
+        }
+        if abs(session.preferredSampleRate - Double(AudioFormat.sampleRate)) > 1 {
+            try session.setPreferredSampleRate(Double(AudioFormat.sampleRate))
+        }
+        if abs(session.preferredIOBufferDuration - 0.01) > 0.001 {
+            try session.setPreferredIOBufferDuration(0.01)
+        }
     }
     
     /// Whether *we* have to activate the session because nothing else will.
@@ -38,9 +56,9 @@ public nonisolated enum CallAudioSessionConfigurator {
     /// about which platforms they apply to.
     public static var isSelfActivating: Bool {
         #if targetEnvironment(simulator)
-        return true
+        true
         #else
-        return ProcessInfo.processInfo.isiOSAppOnMac
+        ProcessInfo.processInfo.isiOSAppOnMac
         #endif
     }
     

@@ -33,8 +33,7 @@ nonisolated extension MatrixRTCStreamKind {
 nonisolated extension MatrixRTCMembershipFormat {
     var ffi: FfiMembershipFormat {
         switch self {
-        case .current: .current
-        case .sticky2025: .sticky2025
+        case .msc: .msc
         case .roomState: .roomState
         }
     }
@@ -58,8 +57,8 @@ nonisolated extension MatrixRTCCallStatus {
             self = .connecting
         case .calling(let callee, let ring, let media):
             self = .calling(callee: callee, ring: .init(ring), media: .init(media))
-        case .connected(let sinceMs, let degraded):
-            self = .connected(since: Date(milliseconds: sinceMs), isDegraded: degraded)
+        case .connected(let since, let degraded):
+            self = .connected(since: Date(milliseconds: since), isDegraded: degraded)
         case .ended(let reason):
             self = .ended(.init(reason))
         }
@@ -71,8 +70,8 @@ nonisolated extension MatrixRTCRingPhase {
         switch phase {
         case .sending:
             self = .sending
-        case .ringing(let sentAtMs, let lifetimeMs):
-            self = .ringing(sentAt: Date(milliseconds: sentAtMs), lifetime: .milliseconds(lifetimeMs))
+        case .ringing(let sentAt, let lifetime):
+            self = .ringing(sentAt: Date(milliseconds: sentAt), lifetime: .milliseconds(lifetime))
         }
     }
 }
@@ -96,7 +95,93 @@ nonisolated extension MatrixRTCEndReason {
         case .othersLeft: self = .othersLeft
         case .empty: self = .empty
         case .slotClosed: self = .slotClosed
-        case .connectionClosed(let message): self = .connectionClosed(message: message)
+        case .connectionClosed(let reason, let message): self = .connectionClosed(reason: .init(reason), message: message)
+        }
+    }
+}
+
+nonisolated extension MatrixRTCConnectionLossReason {
+    init(_ reason: FfiConnectionLossReason) {
+        switch reason {
+        case .budget: self = .budget
+        case .refused: self = .refused
+        case .neverConnected: self = .neverConnected
+        }
+    }
+    
+    var ffi: FfiConnectionLossReason {
+        switch self {
+        case .budget: .budget
+        case .refused: .refused
+        case .neverConnected: .neverConnected
+        }
+    }
+}
+
+nonisolated extension MatrixRTCSignallingHealth {
+    init(_ health: FfiSignallingHealth) {
+        switch health {
+        case .reachable: self = .reachable
+        case .unreachable(let since): self = .unreachable(since: Date(milliseconds: since))
+        }
+    }
+    
+    var ffi: FfiSignallingHealth {
+        switch self {
+        case .reachable: .reachable
+        case .unreachable(let since): .unreachable(sinceMs: since.millisecondsSince1970)
+        }
+    }
+}
+
+nonisolated extension MatrixRTCInterruptions {
+    init(_ record: FfiInterruptions) {
+        self.init(signalling: .init(record.signalling),
+                  isOwnMembershipLapsed: record.ownMembershipLapsed,
+                  ownMedia: .init(record.ownMedia),
+                  membersReconnecting: record.membersReconnecting,
+                  membersUnreachable: record.membersUnreachable,
+                  unableToDecrypt: record.unableToDecrypt,
+                  unmappable: record.unmappable)
+    }
+    
+    var ffi: FfiInterruptions {
+        FfiInterruptions(signalling: signalling.ffi,
+                         ownMembershipLapsed: isOwnMembershipLapsed,
+                         ownMedia: ownMedia.ffi,
+                         membersReconnecting: membersReconnecting,
+                         membersUnreachable: membersUnreachable,
+                         unableToDecrypt: unableToDecrypt,
+                         unmappable: unmappable)
+    }
+}
+
+nonisolated extension MatrixRTCConnectionState {
+    init(_ state: FfiConnectionState) {
+        switch state {
+        case .connecting: self = .connecting
+        case .connected: self = .connected
+        case .reconnecting: self = .reconnecting
+        case .unreachable: self = .unreachable
+        }
+    }
+    
+    var ffi: FfiConnectionState {
+        switch self {
+        case .connecting: .connecting
+        case .connected: .connected
+        case .reconnecting: .reconnecting
+        case .unreachable: .unreachable
+        }
+    }
+}
+
+nonisolated extension MatrixRTCUnableToDecrypt {
+    init(_ reason: FfiUnableToDecrypt) {
+        switch reason {
+        case .missingKey: self = .missingKey
+        case .badKey: self = .badKey
+        case .notEncrypted: self = .notEncrypted
         }
     }
 }
@@ -122,7 +207,8 @@ nonisolated extension MatrixRTCParticipant {
                   userID: participant.userId,
                   deviceID: participant.deviceId,
                   isLocal: participant.isLocal,
-                  isReachable: participant.reachable,
+                  connection: .init(participant.connection),
+                  unableToDecrypt: participant.unableToDecrypt.map(MatrixRTCUnableToDecrypt.init),
                   streams: participant.streams.map { .init(kind: .init($0.kind), isMuted: $0.muted) },
                   handRaisedAt: participant.handRaisedAtMs.map(Date.init(milliseconds:)))
     }
@@ -165,7 +251,8 @@ nonisolated extension MatrixRTCTile {
                   isSpeaking: tile.speaking,
                   handRaisedAt: tile.handRaisedAtMs.map(Date.init(milliseconds:)),
                   handRaisedPosition: tile.handRaisedPosition.map(Int.init),
-                  isReachable: tile.reachable)
+                  connection: .init(tile.connection),
+                  unableToDecrypt: tile.unableToDecrypt.map(MatrixRTCUnableToDecrypt.init))
     }
 }
 
@@ -219,33 +306,35 @@ nonisolated extension MatrixRTCCallEvent {
     /// Nil for what is not surfaced.
     init?(_ event: FfiCallEvent) {
         switch event {
-        case .participantJoined(let memberId, let userId, let participantCount):
-            self = .participantJoined(memberID: memberId, userID: userId, participantCount: Int(participantCount))
-        case .participantLeft(let memberId, let participantCount):
-            self = .participantLeft(memberID: memberId, participantCount: Int(participantCount))
-        case .streamStarted(let memberId, let kind):
-            self = .streamStarted(memberID: memberId, kind: .init(kind))
-        case .streamStopped(let memberId, let kind):
-            self = .streamStopped(memberID: memberId, kind: .init(kind))
-        case .streamMuted(let memberId, let kind):
-            self = .streamMuted(memberID: memberId, kind: .init(kind))
-        case .streamUnmuted(let memberId, let kind):
-            self = .streamUnmuted(memberID: memberId, kind: .init(kind))
-        case .keyImported(let memberId, let keyIndex):
-            self = .keyImported(memberID: memberId, keyIndex: keyIndex)
-        case .frameEncryptionState(let memberId, let state, _):
-            self = .frameEncryptionState(memberID: memberId, state: .init(state))
-        case .keyDiscarded(let memberId, let keyIndex, let senderUserId, let senderDeviceId, let reason):
-            self = .keyDiscarded(memberID: memberId,
-                                 reason: "index \(keyIndex.map(String.init) ?? "?") from \(senderUserId ?? "?")/\(senderDeviceId ?? "?"): \(reason)")
-        case .handRaised(let memberId, let raisedAtMs):
-            self = .handRaised(memberID: memberId, raisedAt: Date(milliseconds: raisedAtMs))
-        case .handLowered(let memberId):
-            self = .handLowered(memberID: memberId)
-        case .reaction(let memberId, let emoji, let name, _):
-            self = .reaction(memberID: memberId, emoji: emoji, name: name)
+        case .participantJoined(let memberID, let userID, let participantCount):
+            self = .participantJoined(memberID: memberID, userID: userID, participantCount: Int(participantCount))
+        case .participantLeft(let memberID, let participantCount):
+            self = .participantLeft(memberID: memberID, participantCount: Int(participantCount))
+        case .streamStarted(let memberID, let kind):
+            self = .streamStarted(memberID: memberID, kind: .init(kind))
+        case .streamStopped(let memberID, let kind):
+            self = .streamStopped(memberID: memberID, kind: .init(kind))
+        case .streamMuted(let memberID, let kind):
+            self = .streamMuted(memberID: memberID, kind: .init(kind))
+        case .streamUnmuted(let memberID, let kind):
+            self = .streamUnmuted(memberID: memberID, kind: .init(kind))
+        case .keyImported(let memberID, let keyIndex):
+            self = .keyImported(memberID: memberID, keyIndex: keyIndex)
+        case .frameEncryptionState(let memberID, let state, _):
+            self = .frameEncryptionState(memberID: memberID, state: .init(state))
+        case .keyDiscarded(let memberID, let keyIndex, let senderUserID, let senderDeviceID, let reason):
+            self = .keyDiscarded(memberID: memberID,
+                                 reason: "index \(keyIndex.map(String.init) ?? "?") from \(senderUserID ?? "?")/\(senderDeviceID ?? "?"): \(reason)")
+        case .handRaised(let memberID, let raisedAt):
+            self = .handRaised(memberID: memberID, raisedAt: Date(milliseconds: raisedAt))
+        case .handLowered(let memberID):
+            self = .handLowered(memberID: memberID)
+        case .reaction(let memberID, let emoji, let name, let sound):
+            self = .reaction(memberID: memberID, emoji: emoji, name: name, sound: sound)
         case .unknownParticipant(let identity):
-            // The transport knows an identity the membership projection doesn't (yet).
+            // The transport knows an identity the membership projection doesn't (yet). What the UI
+            // shows for it comes from the interruptions record, which lists it for as long as it
+            // stays unmapped; this one-shot is diagnostics.
             MatrixRTCLog.debug("Unknown participant on the transport: \(identity)")
             return nil
         case .ownMediaConnectionState(let degraded):

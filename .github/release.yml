@@ -32,12 +32,14 @@ changelog:
     - title: 📄 Documentation
       labels:
         - pr-doc
+    - title: 🗣 Translations
+      labels:
+        - pr-i18n
     - title: 🚧 In development 🚧
       labels:
         - pr-wip
 
-    # No pr-i18n: text comes from the host through ElementCallStrings rather than being translated
-    # here. No pr-element-pro: this package has no enterprise variant.
+    # No pr-element-pro: this package has no enterprise variant.
 
     - title: Others
       labels:

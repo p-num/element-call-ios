@@ -256,10 +256,10 @@ final class TileFullscreenUITests: XCTestCase {
         let flip = app.buttons["Switch camera"].firstMatch
         XCTAssertTrue(flip.waitForExistence(timeout: 2))
         
-        app.buttons["Turn camera off"].tap()
+        app.buttons["Turn the camera off"].tap()
         XCTAssertTrue(flip.waitForNonExistence(timeout: 2), "our tile lost its picture with the camera")
         
-        app.buttons["Turn camera on"].tap()
+        app.buttons["Turn the camera on"].tap()
         XCTAssertTrue(flip.waitForExistence(timeout: 2), "our tile has its picture back")
     }
     
@@ -301,7 +301,7 @@ final class TileFullscreenUITests: XCTestCase {
         share("frank").doubleTap()
         share("frank").tap()
         XCTAssertTrue(exitButtonAppears())
-        XCTAssertTrue(app.staticTexts["Frank (Screen share)"].waitForExistence(timeout: 2))
+        XCTAssertTrue(app.staticTexts["Frank\u{2019}s screen"].waitForExistence(timeout: 2))
         
         share("frank").doubleTap()
         XCTAssertTrue(tile("frank").waitForExistence(timeout: 3))

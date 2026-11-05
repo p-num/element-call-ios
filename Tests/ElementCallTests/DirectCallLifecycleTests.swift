@@ -14,7 +14,7 @@ import Testing
 struct DirectCallLifecycleTests {
     @Test
     func membershipObserversReceiveIndependentOrderedSnapshotsAndFinish() async {
-        let call = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let call = MatrixRTCCall(rtcCall: FakeRTCCall())
         var first = call.membershipSnapshots().makeAsyncIterator()
         var second = call.membershipSnapshots().makeAsyncIterator()
         #expect(await first.next() == [])
@@ -36,7 +36,7 @@ struct DirectCallLifecycleTests {
     
     @Test
     func concurrentHangupsDeliverOneDepartureAndOneDismissal() async throws {
-        let core = FakeRtcCall(holdsLeave: true)
+        let core = FakeRTCCall(holdsLeave: true)
         let controller = ElementCallController.fake(connection: .connected)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
                                    room: ElementCallFakeRoom(), connection: .connected, rtcCall: MatrixRTCCall(rtcCall: core))
@@ -75,10 +75,10 @@ struct DirectCallLifecycleTests {
     }
     #endif
     
-    private func makeCall(isDirect: Bool = true) -> (ElementCallController, MatrixRTCCall, FakeRtcCall) {
-        let controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport(userID: "@me:example.org")),
+    private func makeCall(isDirect: Bool = true) -> (ElementCallController, MatrixRTCCall, FakeRTCCall) {
+        let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(userID: "@me:example.org"),
                                                system: ElementCallFakeSystem(), options: .init(), style: .stock, logger: nil)
-        let core = FakeRtcCall()
+        let core = FakeRTCCall()
         let call = MatrixRTCCall(rtcCall: core)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
                                    room: ElementCallFakeRoom(), connection: .connected, rtcCall: call)
@@ -103,6 +103,6 @@ struct DirectCallLifecycleTests {
             }
             await Task.yield()
         }
-        throw FakeRtcCall.RefusedError()
+        throw FakeRTCCall.RefusedError()
     }
 }

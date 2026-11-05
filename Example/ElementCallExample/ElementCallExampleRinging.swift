@@ -46,8 +46,10 @@ struct ElementCallExampleRinging {
     func play(on scripted: MatrixRTCScriptedCall, tiles playback: ElementCallExampleScenarioPlayback) async {
         // Our own tile, at 0 s.
         await playback.step()
+        playback.timeline = (0, 2, "ring being sent")
         try? await Task.sleep(for: Self.ringOut)
         guard !Task.isCancelled else { return }
+        playback.timeline = (1, 2, "ringing; \(outcome) at \(Self.outcomeAt.seconds) s")
         scripted.report(.calling(callee: Self.callee,
                                  ring: .ringing(sentAt: .now, lifetime: Self.outcomeAt - Self.ringOut),
                                  media: .connected(isDegraded: false)))
@@ -61,5 +63,6 @@ struct ElementCallExampleRinging {
         case .declined: scripted.report(.ended(.declined))
         case .unanswered: scripted.report(.ended(.unanswered))
         }
+        playback.timeline = (2, 2, "\(outcome)")
     }
 }

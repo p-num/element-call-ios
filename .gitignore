@@ -5,6 +5,8 @@
 # The example harness's project is generated from Example/project.yml by XcodeGen, which is what
 # gets reviewed: a pbxproj is forty thousand lines that nobody reads and everybody conflicts on.
 Example/*.xcodeproj
+# Generated with it, from the `info` block in project.yml.
+Example/ElementCallExample/Info.plist
 xcuserdata/
 DerivedData/
 .swiftpm/config/registries.json

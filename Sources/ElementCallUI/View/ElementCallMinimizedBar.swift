@@ -29,7 +29,7 @@ public struct ElementCallMinimizedBar: View {
     public init(controller: ElementCallController, onTap: @escaping () -> Void) {
         self.controller = controller
         self.onTap = onTap
-        roomName = controller.room?.displayName ?? "Call"
+        roomName = controller.room?.displayName ?? L10n.call
     }
     
     public var body: some View {
@@ -38,7 +38,15 @@ public struct ElementCallMinimizedBar: View {
                 style.icons.icon(.videoCall, size: .small, relativeTo: .bodySMSemibold)
                 Text(roomName)
                     .lineLimit(1)
-                if let connectedAt = controller.connectedAt {
+                // In the timer's place while anything is interrupted: the bar's one text line has
+                // room for one of them, and an outage is the more useful (034 R37). Tapping still
+                // restores the call rather than opening the list, which lives on the call screen.
+                if isInterrupted {
+                    style.icons.icon(.info, size: .small, relativeTo: .bodySMSemibold)
+                        .accessibilityHidden(true)
+                    Text(L10n.interruptions)
+                        .lineLimit(1)
+                } else if let connectedAt = controller.connectedAt {
                     Text(connectedAt, style: .timer)
                         .monospacedDigit()
                 }
@@ -46,7 +54,7 @@ public struct ElementCallMinimizedBar: View {
                 style.icons.icon(controller.call?.isMicrophoneMuted == true ? .micOff : .micOn,
                                  size: .small,
                                  relativeTo: .bodySMSemibold)
-                Text("Return")
+                Text(L10n.actionReturnIos)
             }
             .font(style.theme.bodySMSemibold)
             .foregroundStyle(.white)
@@ -57,10 +65,16 @@ public struct ElementCallMinimizedBar: View {
             .padding(.top, 4)
         }
         .buttonStyle(.plain)
-        .accessibilityLabel("Return to call")
+        // The bar's own label replaces what is drawn in it, so the indicator is said here or not
+        // at all.
+        .accessibilityLabel(isInterrupted ? L10n.a11yReturnToCallInterruptedIos(L10n.interruptions) : L10n.a11yReturnToCallIos)
         .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.minimizedBar)
         .environment(\.elementCallStyle, controller.style)
         .onReceive(namePublisher) { roomName = $0 }
+    }
+    
+    private var isInterrupted: Bool {
+        !controller.interruptions.isEmpty
     }
     
     /// A room opened moments ago may not have its name yet, so the bar follows it rather than

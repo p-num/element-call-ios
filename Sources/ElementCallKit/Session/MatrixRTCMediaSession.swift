@@ -30,6 +30,22 @@ public final class MatrixRTCMediaSession {
     /// Our own tile and whether we are sharing our screen; nil until our membership reaches the
     /// roster. Prefer ``ownTile``, which covers that gap.
     public private(set) var localState: MatrixRTCLocalState?
+    /// What is interrupting the call, cause by cause. Published after the roster and local state of
+    /// the same change, so tiles read when this moves already agree with it (034 C5).
+    public private(set) var interruptions: MatrixRTCInterruptions = .none
+    /// Members the core has reported unable to decrypt for longer than ``keysMissingAfter``, without
+    /// a break.
+    public private(set) var membersMissingKeys: Set<String> = []
+    /// When each member's current spell of being unable to decrypt reaches ``keysMissingAfter``.
+    @ObservationIgnored private var keySpells: [String: Task<Void, Never>] = [:]
+    
+    /// How long a tile shows it is waiting for a member's key before saying the key is missing.
+    /// Counted from the core's report, which already waited out a key rotation (its key grace, C6),
+    /// so the spinner always has this long. Nothing here can tell why a key does not come — a slow
+    /// send, a session that is wedged, a device we do not trust, federation lag — so past this a tile
+    /// says only that it is missing, for that one member (feature-hq 034 Q8). On the call's clock so
+    /// a scenario can step past it.
+    public static let keysMissingAfter: Duration = .seconds(10)
     
     /// Our own tile — and the reason this is not simply `localState?.tile`.
     ///
@@ -56,7 +72,7 @@ public final class MatrixRTCMediaSession {
                              isMicrophoneMuted: !local.isPublishing(.microphone),
                              isSpeaking: false,
                              handRaisedAt: local.handRaisedAt,
-                             isReachable: local.isReachable)
+                             connection: local.connection)
     }
     
     public private(set) var audioLevels: [String: MatrixRTCAudioLevel] = [:]
@@ -171,6 +187,31 @@ public final class MatrixRTCMediaSession {
         set { joinLeaveSoundPolicy.participantCap = newValue }
     }
     
+    /// The reactions showing now, in order of arrival (037). Each joins once its spread is over and
+    /// leaves four seconds after it arrived; how long it is drawn for, within that, is the UI's.
+    public private(set) var reactions: [MatrixRTCReaction] = []
+    
+    /// What the call does with reactions, from the user's preference. Read as each reaction arrives,
+    /// so a change applies to the next one and leaves those already showing or sounding to finish
+    /// (037 R15). Off until whoever connected the call says otherwise.
+    public var reactionsMode: MatrixRTCReactionsMode = .off {
+        didSet {
+            if reactionsMode == .withSound {
+                audio.prepareReactionSounds()
+            }
+        }
+    }
+    
+    /// Up to half a second, at random, so reactions that one sync delivered together neither rise in
+    /// a line nor fuse into one blare (037 R2b).
+    public nonisolated static let maximumReactionSpread: Duration = .milliseconds(500)
+    
+    @ObservationIgnored private var nextReactionID: UInt64 = 0
+    /// Each reaction's spread and its end, on ``clock``, so a scenario can step through both. Read
+    /// by tests, to know a reaction has been received before they move the clock.
+    @ObservationIgnored private(set) var reactionTimers: [UInt64: [Task<Void, Never>]] = [:]
+    @ObservationIgnored private let reactionSpread: () -> Duration
+    
     /// Whether a join or leave sounds. They play through the call's ``CallAudio``.
     @ObservationIgnored private var joinLeaveSoundPolicy: JoinLeaveSoundPolicy
     /// Time on ``clock`` since the session was made: what the sound throttle measures against.
@@ -209,12 +250,14 @@ public final class MatrixRTCMediaSession {
          mediaSession: any MediaSessionProtocol,
          audio: CallAudio = CallAudio(),
          clock: any Clock<Duration> = ContinuousClock(),
-         capturesCamera: Bool = true) {
+         capturesCamera: Bool = true,
+         reactionSpread: @escaping () -> Duration = { .milliseconds(Int.random(in: 0...500)) }) {
         self.localMemberID = localMemberID
         self.audio = audio
         self.mediaSession = mediaSession
         self.clock = clock
         self.capturesCamera = capturesCamera
+        self.reactionSpread = reactionSpread
         joinLeaveSoundPolicy = JoinLeaveSoundPolicy(participantCap: Self.defaultParticipantCapForJoinLeaveSounds)
         elapsed = stopwatch(clock)
         (events, eventsContinuation) = AsyncStream.makeStream(bufferingPolicy: .bufferingNewest(64))
@@ -232,10 +275,12 @@ public final class MatrixRTCMediaSession {
         tasks.append(Task { [weak self] in await self?.pumpEvents() })
         tasks.append(Task { [weak self] in await self?.pumpTileRoster() })
         tasks.append(Task { [weak self] in await self?.pumpLocalState() })
+        tasks.append(Task { [weak self] in await self?.pumpInterruptions() })
         tasks.append(Task { [weak self] in await self?.pollReceiveStats() })
         seedParticipants()
         apply(mediaSession.roster())
         apply(mediaSession.localState())
+        apply(mediaSession.interruptions())
     }
     
     /// The transport's roster, read once: it is the whole call every time, which is the cost the tile
@@ -602,7 +647,7 @@ public final class MatrixRTCMediaSession {
         let key = MatrixRTCStreamRef(memberID: memberID, kind: kind)
         let source = videoSources[key] ?? {
             let mediaSession = mediaSession
-            let source = RemoteVideoSource(open: {
+            let source = RemoteVideoSource(label: "\(memberID)/\(kind)", open: {
                 mediaSession.videoStream(memberId: memberID, kind: kind.ffi).map(VideoFrameStreamBox.init)
             }, onIdle: { [weak self] in
                 // Nobody draws it any more: stop asking the SFU for it.
@@ -657,6 +702,12 @@ public final class MatrixRTCMediaSession {
                 drawnSizes[key] = sizes
             }
             return
+        }
+        // A drawn slot no source holds (one closed under it) is attached again: a backstop for a
+        // returning member whose stream never announced itself, since the tile's size reports go on.
+        if size != nil, videoSources[key]?.holds(slot) != true {
+            MatrixRTCLog.info("Video \(memberID)/\(kind): a drawn slot is not attached; attaching it again")
+            attachVideo(slot, memberID: memberID, kind: kind)
         }
         var sizes = drawnSizes[key] ?? [:]
         sizes[slot.id] = size
@@ -846,6 +897,10 @@ public final class MatrixRTCMediaSession {
         pendingReleases.values.forEach { $0.cancel() }
         pendingReleases.removeAll()
         tasks.forEach { $0.cancel() }
+        keySpells.values.forEach { $0.cancel() }
+        reactionTimers.values.joined().forEach { $0.cancel() }
+        reactionTimers.removeAll()
+        reactions.removeAll()
         tasks.removeAll()
         audioLevelFlush?.cancel()
         audioLevelFlush = nil
@@ -894,6 +949,13 @@ public final class MatrixRTCMediaSession {
         MatrixRTCLog.debug("Local state pump stopped")
     }
     
+    private func pumpInterruptions() async {
+        while !Task.isCancelled, let record = await mediaSession.nextInterruptions() {
+            apply(record)
+        }
+        MatrixRTCLog.debug("Interruptions pump stopped")
+    }
+    
     private func apply(_ roster: FfiTileRoster) {
         let mapped = MatrixRTCTileRoster(roster, localMemberID: localMemberID)
         // Bail before assigning, for the reason `refreshParticipants` gives: every tile view reads
@@ -905,6 +967,24 @@ public final class MatrixRTCMediaSession {
         }
         tiles = mapped
         reconcilePlayback()
+        reconcileKeySpells()
+    }
+    
+    /// From both the tiles and the record: a change reaches the tiles first (C5), and a spell has to
+    /// have begun by then or the tile draws its spinner for the moment in between.
+    private func reconcileKeySpells() {
+        let unableToDecrypt = Set(interruptions.unableToDecrypt)
+            .union(tiles.detail.values.filter { $0.unableToDecrypt != nil }.map(\.memberID))
+        for memberID in Set(keySpells.keys).subtracting(unableToDecrypt) {
+            keySpells.removeValue(forKey: memberID)?.cancel()
+            membersMissingKeys.remove(memberID)
+        }
+        // Kept once it has fired, so a spell that outlasts the wait is not granted a second one.
+        for memberID in unableToDecrypt where keySpells[memberID] == nil {
+            keySpells[memberID] = clock.schedule(after: Self.keysMissingAfter) { [weak self] in
+                self?.membersMissingKeys.insert(memberID)
+            }
+        }
     }
     
     private func apply(_ state: FfiLocalState?) {
@@ -912,6 +992,16 @@ public final class MatrixRTCMediaSession {
         guard mapped != localState else { return }
         localState = mapped
         reconcileScreenShare()
+    }
+    
+    /// Logged whole on every change: it is a handful of short lists, and a rageshake of a call that
+    /// went wrong is read for exactly when each cause came and went.
+    private func apply(_ record: FfiInterruptions) {
+        let mapped = MatrixRTCInterruptions(record)
+        guard mapped != interruptions else { return }
+        MatrixRTCLog.info("Interruptions: \(mapped)")
+        interruptions = mapped
+        reconcileKeySpells()
     }
     
     private func pumpEvents() async {
@@ -942,6 +1032,10 @@ public final class MatrixRTCMediaSession {
             playJoinLeaveSound(.leave, for: memberID, participantCount: participantCount)
         case .handRaised(let memberID, _):
             playRaisedHandSound(for: memberID)
+        case .reaction(let memberID, let emoji, let name, let sound):
+            receiveReaction(from: memberID, emoji: emoji, name: name, sound: sound)
+        case .streamStarted(let memberID, let kind):
+            reopenStream(of: memberID, kind: kind)
         default:
             break
         }
@@ -967,6 +1061,34 @@ public final class MatrixRTCMediaSession {
         }
     }
     
+    // MARK: - Reactions
+    
+    /// Which reactions arrive at all is the core's: only while we are in the call, never a replay,
+    /// and never a member's second inside three seconds. What is left here is the user's preference,
+    /// the spread, and how long it lasts.
+    private func receiveReaction(from memberID: String, emoji: String, name: String, sound: String) {
+        let mode = reactionsMode
+        MatrixRTCLog.info("\(memberID) reacted \(name): \(mode)")
+        guard mode != .off else { return }
+        nextReactionID += 1
+        let id = nextReactionID
+        let spread = min(max(reactionSpread(), .zero), Self.maximumReactionSpread)
+        let reaction = MatrixRTCReaction(id: id, memberID: memberID, emoji: emoji, sound: sound, spread: spread)
+        let show = clock.schedule(after: spread) { [weak self] in
+            guard let self else { return }
+            reactions.append(reaction)
+            // With its bubble, not on arrival (R2b); and by the preference it arrived under (R15).
+            if mode == .withSound {
+                audio.playReaction(reaction.sound)
+            }
+        }
+        let end = clock.schedule(after: MatrixRTCReaction.lifetime) { [weak self] in
+            self?.reactions.removeAll { $0.id == id }
+            self?.reactionTimers[id] = nil
+        }
+        reactionTimers[id] = [show, end]
+    }
+    
     /// Reached from the roster only; the dictionary claim keeps a member from being played twice.
     private func playAudio(of memberID: String) {
         guard memberID != localMemberID, playbackSinks[memberID] == nil else { return }
@@ -987,12 +1109,35 @@ public final class MatrixRTCMediaSession {
         MatrixRTCLog.info("Playing audio of \(memberID)")
     }
     
+    /// A stream that starts while we already read it is a new track under the same name: the core
+    /// reports a stream started only after it stopped, and a LiveKit full restart replaces every
+    /// track that way. What we hold reads the old track, which sends nothing again and whose
+    /// `next()` never returns, so neither the roster nor a tile would ever open the new one: after
+    /// a phone came back from 30 s offline, everyone stayed frozen on their last frame.
+    private func reopenStream(of memberID: String, kind: MatrixRTCStreamKind) {
+        switch kind {
+        case .microphone:
+            guard let sink = playbackSinks.removeValue(forKey: memberID) else { return }
+            MatrixRTCLog.info("Reopening the audio of \(memberID) on its new track")
+            sink.stop()
+            playAudio(of: memberID)
+        case .camera, .screenShare:
+            guard let source = videoSources[MatrixRTCStreamRef(memberID: memberID, kind: kind)] else { return }
+            MatrixRTCLog.info("Reopening the \(kind) of \(memberID) on its new track")
+            source.reopen()
+        case .screenShareAudio, .data:
+            break
+        }
+    }
+    
     private func stopPlayback(of memberID: String) {
         playbackSinks.removeValue(forKey: memberID)?.stop()
         audioLevels[memberID] = nil
         pendingAudioLevels[memberID] = nil
-        for key in videoSources.keys where key.memberID == memberID {
-            videoSources.removeValue(forKey: key)?.close()
+        // Suspended rather than closed: see `RemoteVideoSource.suspend`. A tile that does go away
+        // detaches as usual, and the source goes idle like any other.
+        for (key, source) in videoSources where key.memberID == memberID {
+            source.suspend()
         }
     }
     

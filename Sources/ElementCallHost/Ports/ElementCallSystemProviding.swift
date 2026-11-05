@@ -41,8 +41,8 @@ public nonisolated enum ElementCallEndReason: Sendable, Equatable {
 /// Answering an incoming call is deliberately not here. That arrives as a push and ends in a screen
 /// being presented, which is the host's navigation, and reaches this package as an ordinary
 /// ``ElementCallController/startCall(_:room:)``.
-/// Main-actor bound, unlike ``ElementCallMatrixTransportProtocol``: the Rust core calls the transport from
-/// its own threads, whereas this is only ever reached from the call controller.
+/// Main-actor bound, unlike ``ElementCallMatrixBackendProtocol``: the Rust core calls the backend from its own
+/// threads, whereas this is only ever reached from the call controller.
 @MainActor
 public protocol ElementCallSystemProvidingProtocol: AnyObject {
     /// Reports an outgoing call, or attaches to the ringing call this one answers. Must return only

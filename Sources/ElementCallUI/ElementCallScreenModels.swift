@@ -16,24 +16,26 @@ public nonisolated struct ElementCallTile: Identifiable, Equatable, Sendable {
     /// `ForEach` identity, so two tiles sharing one would collapse into a single view.
     public let id: MatrixRTCTileID
     public let userID: String
-    public let displayName: String
-    public let avatarURL: URL?
+    public internal(set) var displayName: String
+    public internal(set) var avatarURL: URL?
     public let isLocal: Bool
     /// Cannot be heard: muted, or no microphone stream reached us at all. The badge collapses the
     /// two on purpose; the stats overlay keeps them apart, where the question is why.
-    public let isMicrophoneMuted: Bool
+    public internal(set) var isMicrophoneMuted: Bool
     /// This tile's own stream is present and unmuted. On a share tile it is the share.
-    public let hasVideo: Bool
+    public internal(set) var hasVideo: Bool
     /// Loud enough to count as talking. A threshold crossing, not a level: nothing continuous
     /// belongs in a tile, which the whole screen is rebuilt to redraw.
-    public let isSpeaking: Bool
+    public internal(set) var isSpeaking: Bool
     /// The hand's place in the queue, as the core numbers it (009 R6); nil with the hand down, or
     /// where no hand is shown (R33).
-    public let handPosition: Int?
+    public internal(set) var handPosition: Int?
     /// The model marks the tile worth the largest slot — a screen share today, a pin later. It does
     /// not choose a spotlight; `ElementCallSpotlight` is where that is decided.
-    public let isHero: Bool
-    public let stats: String?
+    public internal(set) var isHero: Bool
+    public internal(set) var stats: String?
+    /// Whether this tile's media is arriving and can be shown (034 R29, R33, R34).
+    public internal(set) var mediaState: ElementCallTileMediaState = .live
     
     public var memberID: String {
         id.memberID
@@ -50,6 +52,31 @@ public nonisolated struct ElementCallTile: Identifiable, Equatable, Sendable {
     public var hasHandRaised: Bool {
         handPosition != nil
     }
+    
+    /// The name tag's loading indicator shows, and a remote tile draws the avatar rather than its
+    /// last frame. Our own tile keeps its live preview, which is local capture (034 R34).
+    public var isMediaInterrupted: Bool {
+        mediaState != .live
+    }
+}
+
+/// Why a tile's media is not reaching the screen, if it is not.
+public nonisolated enum ElementCallTileMediaState: Equatable, Sendable {
+    case live
+    /// Our own tile only, until our media server is first up.
+    case connecting
+    /// The connection carrying it is being re-established, or nothing can reach it. On our own
+    /// tile, our own media server (034 R23).
+    case reconnecting
+    /// It arrives, and cannot be decrypted (034 R33).
+    case undecryptable
+    /// Its sender's key has not reached us for long enough that the wait is not the moment around a
+    /// key rotation: see ``MatrixRTCMediaSession/keysMissingAfter``.
+    case keysMissing
+    /// The key we hold has not decrypted it for as long: wrong, not late.
+    case keyInvalid
+    /// Its sender declared it unencrypted in an encrypted call, and the core refused it.
+    case notEncrypted
 }
 
 /// A message the screen shows once and then forgets. Replaces the host's alert type so the package
@@ -90,16 +117,31 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     /// Everywhere the call can come out of, external hardware first. See `ElementCallController`.
     public var audioOutputs: [CallAudioOutput] = []
     public var audioOutput: CallAudioOutput?
-    public var isMediaDegraded = false
     public var isTileStatsVisible = false
     public var isDeveloperModeEnabled = false
+    /// The reactions to draw, oldest first, once each has waited out its spread (037).
+    public var reactions: [ElementCallReactionBubble] = []
+    /// The user's choice for reactions, which the Preferences sheet shows and changes (037 R13).
+    public var reactionsPreference: ElementCallReactionsPreference = .withSound
+    /// How loud the call's sound effects play, 0 to 1 of the call's level (037 R22).
+    public var soundEffectsVolume: Float = 0.5
+    /// Whether the Preferences sheet is open. Closed by the screen when the call is minimised, enters
+    /// Picture in Picture or ends, since there is no room for it there (037 R12a).
+    public var isPreferencesPresented = false
     public var isScreenSharingEnabled = false
-    /// Our hand as the other participants see it, from our own tile (009 R5).
+    /// Our hand as the user asked for it, from our own tile, which the core moves at once and
+    /// keeps there until it lands or is refused (009 R5, 034 C12).
     public var isHandRaised = false
-    /// A raise or a lower is with the homeserver; the control shows progress and takes no taps.
-    public var isHandPending = false
     /// Joined: there is a membership to put a hand on.
     public var isHandRaiseAvailable = false
+    /// Our homeserver answers. While it does not, the hand is disabled: a raise could not reach
+    /// anyone (034 R15).
+    public var isSignallingReachable = true
+    /// Our own media server is being reconnected, so a share could not start (034 R15).
+    public var isOwnMediaReconnecting = false
+    /// What the service interruptions list shows, at most one entry per kind; empty when nothing is
+    /// interrupted, which is when the indicator goes (034 R35).
+    public var interruptions: [ElementCallInterruption] = []
     
     public var isRinging: Bool {
         if case .calling = connection {
@@ -120,6 +162,18 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     /// alike, since only the tile list says whether a call is one-to-one.
     static func showingHands(_ tiles: [ElementCallTile]) -> [ElementCallTile] {
         ElementCallSmallCallLayout.isFullBleed(tiles) ? tiles.map { $0.withHandHidden() } : tiles
+    }
+    
+    /// Mic, camera and hang-up are never disabled by an interruption: a mute made during one holds
+    /// and applies when media resumes (034 R15).
+    public var isHandControlEnabled: Bool {
+        isSignallingReachable
+    }
+    
+    /// Starting a share needs our media server; stopping one never does, so a share in progress can
+    /// always be ended.
+    public var isScreenShareControlEnabled: Bool {
+        isScreenSharing || !isOwnMediaReconnecting
     }
     
     /// From three people, ourselves included: alone or one-to-one there is nobody to queue behind
@@ -173,48 +227,24 @@ extension ElementCallTile {
     /// it on means rewriting the tiles rather than setting a flag; a live screen rebuilds them from
     /// receive statistics on every refresh, and the harness has to do the same by hand.
     func withStats(_ stats: String?) -> ElementCallTile {
-        ElementCallTile(id: id,
-                        userID: userID,
-                        displayName: displayName,
-                        avatarURL: avatarURL,
-                        isLocal: isLocal,
-                        isMicrophoneMuted: isMicrophoneMuted,
-                        hasVideo: hasVideo,
-                        isSpeaking: isSpeaking,
-                        handPosition: handPosition,
-                        isHero: isHero,
-                        stats: stats)
+        var tile = self
+        tile.stats = stats
+        return tile
     }
     
     /// A copy with no hand shown, whoever's tile it is; the hand is still up (009 R33).
     nonisolated func withHandHidden() -> ElementCallTile {
-        ElementCallTile(id: id,
-                        userID: userID,
-                        displayName: displayName,
-                        avatarURL: avatarURL,
-                        isLocal: isLocal,
-                        isMicrophoneMuted: isMicrophoneMuted,
-                        hasVideo: hasVideo,
-                        isSpeaking: isSpeaking,
-                        handPosition: nil,
-                        isHero: isHero,
-                        stats: stats)
+        var tile = self
+        tile.handPosition = nil
+        return tile
     }
     
     /// Our own hand, for the harness, which has no call to read it back from.
     func withHandPosition(_ handPosition: Int?) -> ElementCallTile {
         guard isLocal else { return self }
-        return ElementCallTile(id: id,
-                               userID: userID,
-                               displayName: displayName,
-                               avatarURL: avatarURL,
-                               isLocal: isLocal,
-                               isMicrophoneMuted: isMicrophoneMuted,
-                               hasVideo: hasVideo,
-                               isSpeaking: isSpeaking,
-                               handPosition: handPosition,
-                               isHero: isHero,
-                               stats: stats)
+        var tile = self
+        tile.handPosition = handPosition
+        return tile
     }
     
     /// Our own mute and camera, taken from the controls rather than from the tile; anyone else's
@@ -225,17 +255,29 @@ extension ElementCallTile {
     /// tile exactly as a real one does.
     func withLocalMedia(isMicrophoneMuted: Bool, hasVideo: Bool) -> ElementCallTile {
         guard isLocal else { return self }
-        return ElementCallTile(id: id,
-                               userID: userID,
-                               displayName: displayName,
-                               avatarURL: avatarURL,
-                               isLocal: isLocal,
-                               isMicrophoneMuted: isMicrophoneMuted,
-                               hasVideo: hasVideo,
-                               isSpeaking: isSpeaking,
-                               handPosition: handPosition,
-                               isHero: isHero,
-                               stats: stats)
+        var tile = self
+        tile.isMicrophoneMuted = isMicrophoneMuted
+        tile.hasVideo = hasVideo
+        return tile
+    }
+}
+
+/// A received reaction, as a bubble rising over the call (037 R1).
+public nonisolated struct ElementCallReactionBubble: Identifiable, Equatable, Sendable {
+    public let id: UInt64
+    public let emoji: String
+    /// Fixed when the bubble appears: a profile that loads, or a sender who leaves, meanwhile does
+    /// not change it (037 R7a).
+    public let senderName: String
+    /// How long it waited before showing, which comes off its time on screen, so that every bubble
+    /// is gone four seconds after its reaction arrived (037 R1a, R2b).
+    public let spread: Duration
+    
+    public init(id: UInt64, emoji: String, senderName: String, spread: Duration = .zero) {
+        self.id = id
+        self.emoji = emoji
+        self.senderName = senderName
+        self.spread = spread
     }
 }
 
@@ -248,6 +290,12 @@ public nonisolated enum ElementCallScreenViewAction: Sendable {
     case toggleRaisedHand
     case selectAudioOutput(CallAudioOutput)
     case toggleTileStats
+    case showPreferences
+    case dismissPreferences
+    case setReactionsPreference(ElementCallReactionsPreference)
+    case setSoundEffectsVolume(Float)
+    /// The slider was let go: one short sound at the volume chosen (037 R24).
+    case playSoundEffectsVolumeSample
     case minimize
     case hangUp
     case dismiss

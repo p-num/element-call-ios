@@ -31,7 +31,7 @@ struct ElementCallExampleApp: App {
     /// Xcode's console both show. Without a sink the core drops every line, which left a fixture
     /// that made no sound on a phone with nothing to say why.
     init() {
-        MatrixRTCLogging.install { record in
+        MatrixRTCLogging.install(filter: Self.logFilter ?? MatrixRTCLogging.defaultFilter) { record in
             FileHandle.standardError.write(Data("[\(record.target)] \(record.message)\n".utf8))
         }
     }
@@ -41,6 +41,15 @@ struct ElementCallExampleApp: App {
             ElementCallExampleRootView(target: .fromLaunchArguments())
                 .environment(\.elementCallChromeReturnDelay, Self.chromeReturnDelay ?? EnvironmentValues().elementCallChromeReturnDelay)
         }
+    }
+    
+    /// `-logFilter <env-filter>` overrides the Rust log filter for a session, e.g.
+    /// `libwebrtc=debug` to trace the frame cryptor. Omitted, the default filter applies.
+    private static var logFilter: String? {
+        let arguments = ProcessInfo.processInfo.arguments
+        guard let index = arguments.firstIndex(of: "-logFilter"),
+              let filter = arguments[safe: index + 1] else { return nil }
+        return filter
     }
     
     private static var chromeReturnDelay: Duration? {
@@ -54,7 +63,14 @@ struct ElementCallExampleApp: App {
 struct ElementCallExampleRootView: View {
     let target: ElementCallExampleLaunchTarget
     
+    /// The fixtures, or the lab: a real call over a logged-in account.
+    enum Tab {
+        case fixtures
+        case lab
+    }
+    
     @State private var host = ElementCallExampleHost()
+    @State private var tab = Tab.fixtures
     @State private var video = TestPatternVideo()
     
     var body: some View {
@@ -63,20 +79,32 @@ struct ElementCallExampleRootView: View {
             // losing its scroll position costs nothing, and in exchange the accessibility tree a UI
             // test walks during a call is the one it walked before any of this existed.
             if host.session == nil || host.isMinimized {
-                ElementCallExampleCatalogue(target: target,
-                                            notice: host.notice,
-                                            returningTo: host.lastOpenedRow,
-                                            onPick: { host.open($0) },
-                                            onPickScenario: { host.open($0) })
-                    .transition(.opacity)
-                    // An inset rather than an overlay: it pushes the list down instead of covering
-                    // its first row, which is what a host does and what makes the point of the
-                    // thing — you can see the catalogue behind the call — actually legible.
-                    .safeAreaInset(edge: .top) {
-                        if let session = host.session {
-                            ElementCallMinimizedBar(controller: session.controller) { host.restore() }
-                        }
+                TabView(selection: $tab) {
+                    ElementCallExampleCatalogue(target: target,
+                                                notice: host.notice,
+                                                returningTo: host.lastOpenedRow,
+                                                onPick: { host.open($0) },
+                                                onPickScenario: { host.open($0) })
+                        .tabItem { Label("Fixtures", systemImage: "square.grid.2x2") }
+                        .tag(Tab.fixtures)
+                    ElementCallExampleLabTab(notice: host.notice,
+                                             account: host.labAccount,
+                                             format: host.labFormat,
+                                             onScan: { host.open($0) },
+                                             onRejoin: { host.rejoinLab() },
+                                             onLogOut: { host.logOutLab() })
+                        .tabItem { Label("Lab", systemImage: "flask") }
+                        .tag(Tab.lab)
+                }
+                .transition(.opacity)
+                // An inset rather than an overlay: it pushes the list down instead of covering
+                // its first row, which is what a host does and what makes the point of the
+                // thing — you can see the catalogue behind the call — actually legible.
+                .safeAreaInset(edge: .top) {
+                    if let session = host.session {
+                        ElementCallMinimizedBar(controller: session.controller) { host.restore() }
                     }
+                }
             }
             
             // Unmounted while minimized rather than left to draw `ElementCallView`'s own minimized
@@ -93,6 +121,12 @@ struct ElementCallExampleRootView: View {
         // Presenting the call is the host's to animate, so the harness does what a host would: a
         // cross-fade between the catalogue and the call, both ways.
         .animation(.easeInOut(duration: 0.3), value: host.session == nil || host.isMinimized)
+        // The lab's QR code, scanned with the camera app: `elementcall-lab://join?...`.
+        .onOpenURL { url in
+            guard let join = ElementCallExampleLabJoin(url: url) else { return }
+            tab = .lab
+            host.open(join)
+        }
         .onAppear {
             guard host.session == nil else { return }
             // Opened by a launch argument: straight to the call, with no fade from a catalogue the
@@ -103,6 +137,9 @@ struct ElementCallExampleRootView: View {
                 switch target {
                 case .fixture(let fixture): host.open(fixture)
                 case .scenario(let scenario): host.open(scenario)
+                case .lab(let join):
+                    tab = .lab
+                    host.open(join)
                 case .catalogue, .unknown: break
                 }
             }

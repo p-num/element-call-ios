@@ -544,10 +544,12 @@ struct ElementCallStage: View {
         // for that reason: with one `position`, an arrangement change during a scroll carried the
         // sticky part on the spring, and it lagged the finger and sprang back to the top.
         let pin = placement.isSpotlight || placement.appearance == .fullscreen ? stage.viewport.minY : 0
-        // Our own tile in a small call answers neither tap: it does not go full screen (019 R14),
-        // and a tap on it does not toggle the chrome (R23). Its gestures stay attached, so the tap is
-        // still the tile's rather than falling through to the stage behind it.
-        let isOwnSmallCallTile = placement.tile.isLocal && stage.isStatic
+        // Our floating tile answers neither tap: it does not go full screen (019 R14), and a tap on
+        // it does not toggle the chrome (R23). Its gestures stay attached, so the tap is still the
+        // tile's rather than falling through to the stage behind it. Only floating, not any own tile
+        // in a small call: from three people ours is an inline card cropped to 4:3, and full screen
+        // is the one place that shows all of what we send.
+        let isOwnFloatingTile = placement.tile.isLocal && placement.appearance == .floating
         return ElementCallTileView(tile: placement.tile,
                                    callProvider: callProvider,
                                    isSpotlight: placement.isSpotlight,
@@ -566,7 +568,7 @@ struct ElementCallStage: View {
                                    // than an avatar (R49). The call is what stops its stream meanwhile.
                                    isVideoSuspended: false,
                                    contentFit: placement.contentFit,
-                                   allowsFullscreen: !isOwnSmallCallTile,
+                                   allowsFullscreen: !isOwnFloatingTile,
                                    canSwitchCamera: canSwitchCamera,
                                    isFrontCamera: isFrontCamera,
                                    floatingCorner: placement.appearance == .floating ? ownCorner : nil,
@@ -578,7 +580,7 @@ struct ElementCallStage: View {
                                        ownVideoAspect = aspect
                                    },
                                    onToggleFullscreen: { onToggleFullscreen(placement.id) },
-                                   onToggleChrome: isOwnSmallCallTile ? { } : onToggleChrome,
+                                   onToggleChrome: isOwnFloatingTile ? { } : onToggleChrome,
                                    onAction: onAction)
             .equatable()
             .background {
@@ -690,7 +692,7 @@ struct ElementCallStage: View {
         .buttonStyle(.plain)
         .disabled(!isEnabled)
         .opacity(isEnabled ? 1 : 0.35)
-        .accessibilityLabel(step < 0 ? "Previous shared screen" : "Next shared screen")
+        .accessibilityLabel(step < 0 ? L10n.a11yPreviousHero : L10n.a11yNextHero)
         .accessibilityIdentifier(step < 0 ? ElementCallAccessibilityIdentifiers.heroPrevious : ElementCallAccessibilityIdentifiers.heroNext)
     }
     

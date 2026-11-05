@@ -162,7 +162,7 @@ fi
 #
 # The release job runs on Linux and never opens Xcode, so it cannot test anything itself. It asks
 # instead whether the Tests workflow already passed for this exact commit, which keeps the pinned
-# simulator triple in tests.yml and record-snapshots.yml rather than adding a third copy here.
+# simulator triple in the workflows that test rather than adding another copy here.
 # tests.yml runs on pushes to release/** for this reason.
 #
 # Skipped for a local rehearsal, where the answer is usually "not pushed yet".

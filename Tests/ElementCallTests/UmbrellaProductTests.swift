@@ -5,8 +5,8 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
-// Deliberately the only import: this file exists to prove that one import reaches all four
-// modules. Adding `import ElementCallKit` here to fix a build failure would defeat it — fix the
+// Deliberately the only import: this file exists to prove that one import reaches all three
+// modules and the core's bindings. Adding `import ElementCallKit` here to fix a build failure would defeat it — fix the
 // re-export in Sources/ElementCall instead.
 import ElementCall
 import Testing
@@ -21,11 +21,11 @@ nonisolated struct UmbrellaProductTests {
         #expect(ElementCallOptions().isPictureInPictureEnabled)
         // ElementCallUI
         #expect(!ElementCallAccessibilityIdentifiers.minimizedBar.isEmpty)
-        // ElementCallMatrix, and with it that the conformance still crosses the boundary: the
-        // protocol comes from ElementCallKit and the type implementing it from ElementCallMatrix,
-        // so this only compiles if the umbrella re-exports both. Named rather than constructed
-        // because a transport needs a real Client.
-        let transport: any ElementCallMatrixTransportProtocol.Type = ElementCallSDKTransport.self
-        #expect(transport is ElementCallSDKTransport.Type)
+        // That a host can implement the backend the stack takes: the protocol comes from
+        // ElementCallKit and the conformance from ElementCallHost.
+        let backend: any ElementCallMatrixBackendProtocol = ElementCallFakeMatrixBackend()
+        #expect(backend.userID == "@alice:example.org")
+        // The core's bindings.
+        #expect(!sdkVersion().isEmpty)
     }
 }

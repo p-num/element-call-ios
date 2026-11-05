@@ -1,0 +1,11 @@
+# Run by scripts/download-strings.sh, from the repository root.
+input_dir: ../../Sources/ElementCallHost/
+output_dir: ../../Sources/ElementCallHost/Generated/
+strings:
+  - inputs: Resources/Localizations/en.lproj
+    filter: Localizable*
+    outputs:
+      templatePath: Templates/Strings.stencil
+      output: Strings.swift
+      params:
+        enumName: L10n

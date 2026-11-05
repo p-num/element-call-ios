@@ -16,7 +16,7 @@ import Testing
 struct CallDepartureTests {
     @Test(arguments: [true, false])
     func repeatedLeaveSharesTheOriginalPendingResult(succeeds: Bool) async throws {
-        let core = FakeRtcCall(holdsLeave: true)
+        let core = FakeRTCCall(holdsLeave: true)
         let call = MatrixRTCCall(rtcCall: core)
         let first = Task { await call.leave() }
         try await waitForLeave(core)
@@ -31,7 +31,7 @@ struct CallDepartureTests {
         }
         #expect(!secondCompleted)
         #expect(core.leaveCount == 1)
-        core.answerLeave(failingWith: succeeds ? nil : FakeRtcCall.RefusedError())
+        core.answerLeave(failingWith: succeeds ? nil : FakeRTCCall.RefusedError())
         let expected: MatrixRTCLeaveResult = succeeds ? .confirmed : .failed
         #expect(await first.value == expected)
         #expect(await second.value == expected)
@@ -41,7 +41,7 @@ struct CallDepartureTests {
     
     @Test(arguments: [true, false])
     func localEndedCarriesTheActualDepartureResult(succeeds: Bool) async throws {
-        let core = FakeRtcCall(holdsLeave: true)
+        let core = FakeRTCCall(holdsLeave: true)
         let controller = ElementCallController.fake(connection: .connected)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
                                    room: ElementCallFakeRoom(), connection: .connected,
@@ -56,7 +56,7 @@ struct CallDepartureTests {
         try await waitForLeave(core)
         #expect(!ended)
         #expect(controller.lastDeparture == nil)
-        core.answerLeave(failingWith: succeeds ? nil : FakeRtcCall.RefusedError())
+        core.answerLeave(failingWith: succeeds ? nil : FakeRTCCall.RefusedError())
         for _ in 0..<1000 where !ended {
             await Task.yield()
         }
@@ -68,13 +68,13 @@ struct CallDepartureTests {
         observer.cancel()
     }
     
-    private func waitForLeave(_ core: FakeRtcCall) async throws {
+    private func waitForLeave(_ core: FakeRTCCall) async throws {
         for _ in 0..<1000 {
             if core.hasPendingLeave {
                 return
             }
             await Task.yield()
         }
-        throw FakeRtcCall.RefusedError()
+        throw FakeRTCCall.RefusedError()
     }
 }

@@ -24,7 +24,8 @@ public enum ElementCallPreviewFixtures {
                             isHero: Bool = false,
                             isSpeaking: Bool = false,
                             handPosition: Int? = nil,
-                            stats: String? = nil) -> ElementCallTile {
+                            stats: String? = nil,
+                            mediaState: ElementCallTileMediaState = .live) -> ElementCallTile {
         let user = "@\(name.lowercased()):example.com"
         return ElementCallTile(id: MatrixRTCTileID(memberID: "\(user):DEVICE", kind: kind),
                                userID: user,
@@ -36,12 +37,13 @@ public enum ElementCallPreviewFixtures {
                                isSpeaking: isSpeaking,
                                handPosition: handPosition,
                                isHero: isHero,
-                               stats: stats)
+                               stats: stats,
+                               mediaState: mediaState)
     }
     
     /// A member's screen, which is a tile of its own beside their camera rather than a state of it.
     ///
-    /// Separate from ``tile(_:kind:isLocal:isMuted:hasVideo:isHero:isSpeaking:handPosition:stats:)``
+    /// Separate from ``tile(_:kind:isLocal:isMuted:hasVideo:isHero:isSpeaking:handPosition:stats:mediaState:)``
     /// so a fixture cannot build one and forget that it shares a member ID with that member's
     /// camera. That sharing is the whole of what changed, and nothing in the suite covered it.
     public static func share(_ name: String, isHero: Bool = true) -> ElementCallTile {

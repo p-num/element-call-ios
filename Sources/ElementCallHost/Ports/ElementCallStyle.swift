@@ -26,6 +26,7 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     
     // Icons
     @MainActor var iconPrimary: Color { get }
+    @MainActor var iconSecondary: Color { get }
     @MainActor var iconQuaternary: Color { get }
     @MainActor var iconAccentPrimary: Color { get }
     @MainActor var iconCriticalPrimary: Color { get }
@@ -45,6 +46,8 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     @MainActor var bodySM: Font { get }
     @MainActor var bodySMSemibold: Font { get }
     @MainActor var bodyLGSemibold: Font { get }
+    @MainActor var bodyLG: Font { get }
+    @MainActor var headingMDBold: Font { get }
     
     /// The ring round a grid tile whose member is speaking, as layers drawn bottom first. Asked for
     /// with the tile's own size because the design's diagonal is a CSS angle, and where that puts
@@ -62,23 +65,40 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     @MainActor var soundWaveEdge: Color { get }
 }
 
+@MainActor
 public extension ElementCallThemeProtocol {
     /// The design's gradients, so a host theme written before these existed keeps compiling and
     /// gets the designed rings rather than none.
-    @MainActor func activeSpeakerBorder(in size: CGSize) -> [AnyShapeStyle] {
+    func activeSpeakerBorder(in size: CGSize) -> [AnyShapeStyle] {
         ElementCallBorderGradient.activeSpeaker.layers(in: size)
     }
     
-    @MainActor func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle] {
+    func raisedHandBorder(in size: CGSize) -> [AnyShapeStyle] {
         ElementCallBorderGradient.raisedHand.layers(in: size)
     }
     
+    /// Compound's sizes as system text styles, as the token theme draws every font, so a host theme
+    /// written before these existed keeps compiling and the failure screen still scales.
+    var bodyLG: Font {
+        .system(.body)
+    }
+    
+    var headingMDBold: Font {
+        .system(.title2, weight: .bold)
+    }
+    
+    /// Compound's own, which follows the colour scheme, so a host theme written before this existed
+    /// keeps compiling and draws the name tag's spinner as designed.
+    var iconSecondary: Color {
+        CompoundCoreColorTokens.gray900
+    }
+    
     /// Element Call web's: the dark theme's translucent greys, since the call screen is always dark.
-    @MainActor var soundWaveFills: [Color] {
+    var soundWaveFills: [Color] {
         [CompoundCoreColorTokens.alphaGray400, CompoundCoreColorTokens.alphaGray300, CompoundCoreColorTokens.alphaGray200]
     }
     
-    @MainActor var soundWaveEdge: Color {
+    var soundWaveEdge: Color {
         CompoundCoreColorTokens.alphaGray300
     }
 }
@@ -151,7 +171,20 @@ public nonisolated enum ElementCallIcon: Sendable, CaseIterable {
     case raisedHand
     case userProfile
     case overflow
+    /// The overflow menu's way into the Preferences sheet (037 R12).
+    case preferences
     case collapse
+    /// The service interruptions indicator, and the arrow saying it opens something.
+    case info
+    case chevronRight
+    /// A sheet's way out (037 R12a).
+    case close
+    /// The failure screen.
+    case error
+    /// A tile whose media is not arriving; turned by the view.
+    case spinner
+    /// A tile whose member's keys have not come for long enough to say so (034 Q8).
+    case keyOff
 }
 
 public nonisolated enum ElementCallIconSize: Sendable {
@@ -169,8 +202,8 @@ public nonisolated protocol ElementCallIconRenderingProtocol: Sendable {
     func icon(_ icon: ElementCallIcon, size: ElementCallIconSize, relativeTo textStyle: ElementCallTextStyle?) -> AnyView
 }
 
+@MainActor
 public extension ElementCallIconRenderingProtocol {
-    @MainActor
     func icon(_ icon: ElementCallIcon, size: ElementCallIconSize = .medium) -> AnyView {
         self.icon(icon, size: size, relativeTo: nil)
     }

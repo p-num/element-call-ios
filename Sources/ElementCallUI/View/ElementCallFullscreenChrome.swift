@@ -40,24 +40,29 @@ struct ElementCallFullscreenChrome: View {
                 style.icons.icon(.collapse)
             }
             .buttonStyle(ElementCallRoundButtonStyle())
-            .accessibilityLabel("Exit full screen")
+            .accessibilityLabel(L10n.a11yExitFullscreen)
             .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.exitFullscreen)
             
             // The room name and the call timer are on the top bar, which full screen has hidden, so
             // the one thing still worth saying is whose picture this is and whether they can be heard.
             HStack(spacing: 4) {
-                style.icons.icon(tile.isMicrophoneMuted ? .micOff : .micOn, size: .xSmall, relativeTo: .bodySM)
+                // The name tag's spinner in the microphone's place, as on the tile (034 R29).
+                if tile.isMediaInterrupted {
+                    ElementCallMediaIndicator(state: tile.mediaState)
+                } else {
+                    style.icons.icon(tile.isMicrophoneMuted ? .micOff : .micOn, size: .xSmall, relativeTo: .bodySM)
+                }
                 // Named as well as labelled, and for the same reason the tile's own pill is: a
-                // share is a tile of its own now, beside its owner's camera, so "(Screen share)"
+                // share is a tile of its own now, beside its owner's camera, so "Screen share"
                 // alone no longer says whose screen you are looking at.
-                Text(tile.isScreenShare ? "\(tile.displayName) (Screen share)" : tile.displayName)
+                Text(tile.isScreenShare ? L10n.sharedScreenName(tile.displayName) : tile.displayName)
                     .lineLimit(1)
             }
             .font(style.theme.bodySMSemibold)
             .foregroundStyle(style.theme.textPrimary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.black.opacity(0.5), in: Capsule())
+            .background(style.theme.bgCanvasDefault, in: Capsule())
             .accessibilityElement(children: .combine)
             
             Spacer()
@@ -67,10 +72,12 @@ struct ElementCallFullscreenChrome: View {
             if tile.isLocal, tile.hasVideo {
                 Button { onAction(.switchCamera) } label: {
                     style.icons.icon(.switchCamera, size: .small, relativeTo: .bodySM)
+                        .foregroundStyle(style.theme.iconPrimary)
                         .padding(6)
-                        .background(Color.black.opacity(0.5), in: Circle())
+                        // Interactive, and it has to be: see `ElementCallGlass`.
+                        .elementCallGlass(in: Circle(), fallback: style.theme.bgSubtleSecondary, isInteractive: true)
                 }
-                .accessibilityLabel("Switch camera")
+                .accessibilityLabel(L10n.a11ySwitchCamera)
             }
         }
     }

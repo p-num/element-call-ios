@@ -405,9 +405,9 @@ struct ElementCallSmallCallLayoutTests {
     /// R26: our tile says whether our camera is on, and where it floats; inline, no corner.
     @Test
     func ourTileIsAnnouncedWithItsCameraAndCorner() {
-        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: true, corner: .bottomRight) == "You, camera on, bottom right")
-        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: false, corner: .topLeft) == "You, camera off, top left")
-        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: true, corner: nil) == "You, camera on")
+        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: true, corner: .bottomRight) == "You, Camera on, Bottom right")
+        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: false, corner: .topLeft) == "You, Camera off, Top left")
+        #expect(ElementCallTileView.ownLabel(name: "You", hasVideo: true, corner: nil) == "You, Camera on")
     }
     
     /// R25: every corner but the one it is in, so VoiceOver can reach all four without a drag.
@@ -418,7 +418,7 @@ struct ElementCallSmallCallLayoutTests {
             #expect(offered.count == 3)
             #expect(!offered.contains(corner))
         }
-        #expect(ElementCallTileView.spokenName(of: .bottomLeft) == "bottom left")
+        #expect(ElementCallTileView.moveLabel(to: .bottomLeft) == "Move to bottom left")
     }
     
     /// R27: floating, our tile is read after the other person; inline, first, as drawn.

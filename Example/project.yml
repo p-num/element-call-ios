@@ -17,6 +17,12 @@ options:
 packages:
   ElementCall:
     path: ../
+  # Only for the reference MatrixBackend in ElementCallExample/Matrix: the package itself carries no
+  # SDK, so a host is never held to our SDK version. Exact here because nothing depends on the
+  # example, so a pin costs nobody anything and keeps what is compiled reproducible.
+  MatrixRustSDK:
+    url: https://github.com/element-hq/matrix-rust-components-swift
+    exactVersion: 26.10.30-2
 
 targets:
   ElementCallExample:
@@ -32,6 +38,18 @@ targets:
     dependencies:
       - package: ElementCall
         product: ElementCall
+      # Embedded, because the SDK ships a dynamic framework: the simulator found it in the build
+      # folder without this, and a phone does not, so the app died at launch on a missing library.
+      - package: MatrixRustSDK
+        product: MatrixRustSDK
+        embed: true
+    # The lab's deep link (ElementCallExampleLab.swift). Merged with the generated Info.plist below.
+    info:
+      path: ElementCallExample/Info.plist
+      properties:
+        CFBundleURLTypes:
+          - CFBundleURLName: io.element.call.example.lab
+            CFBundleURLSchemes: [elementcall-lab]
     settings:
       base:
         # libwebrtc's Objective-C categories live in a static archive and are dead-stripped without
@@ -45,7 +63,31 @@ targets:
         # The ringing fixtures run the call's real audio engine, to be heard, and starting it turns
         # on voice processing, which is the microphone. Nothing is recorded or sent.
         INFOPLIST_KEY_NSMicrophoneUsageDescription: The ringing fixtures play the call's sounds through the call's own audio, which uses the microphone.
+        # A lab call is a real one, on this phone's camera.
+        INFOPLIST_KEY_NSCameraUsageDescription: A lab call sends this phone's camera to the other participants.
+        # The lab's servers are on the laptop's LAN address; iOS asks once before an app may reach one.
+        INFOPLIST_KEY_NSLocalNetworkUsageDescription: The lab's servers run on a laptop on this network.
         TARGETED_DEVICE_FAMILY: "1,2"
+
+  # The reference backend's mappings, in process: the example has no client, so this is all of it
+  # that can run here. Hostless, compiling the backend's sources itself: hosted in the app, the
+  # bundle cannot link the SDK values the tests build, because the app never makes them and they are
+  # stripped from it, and linking a second copy of the SDK beside the app's would duplicate it.
+  ElementCallExampleTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - ElementCallExampleTests
+      - ElementCallExample/Matrix
+    dependencies:
+      - package: ElementCall
+        product: ElementCall
+      - package: MatrixRustSDK
+        product: MatrixRustSDK
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        OTHER_LDFLAGS: $(inherited) -ObjC
 
   ElementCallExampleUITests:
     type: bundle.ui-testing
@@ -63,7 +105,9 @@ schemes:
     build:
       targets:
         ElementCallExample: all
+        ElementCallExampleTests: [test]
         ElementCallExampleUITests: [test]
     test:
       targets:
+        - ElementCallExampleTests
         - ElementCallExampleUITests

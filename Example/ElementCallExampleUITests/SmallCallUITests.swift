@@ -7,7 +7,7 @@
 
 import XCTest
 
-/// Our own floating tile, alone or one to one (spec 019), driven by real touches.
+/// Our own tile in a small call (spec 019), floating or inline, driven by real touches.
 ///
 /// Where it sits, how big, and which corner a release picks are `ElementCallSmallCallLayoutTests`,
 /// in process. What is here is what only a touch can answer: whether the drag reaches the tile past
@@ -156,7 +156,16 @@ final class SmallCallUITests: XCTestCase {
         XCTAssertTrue(hangUp.isHittable, "the control bar is still up")
     }
     
-    /// R14: full screen is for the other people, not for us.
+    /// R14 as amended: from three people our tile is an inline card cropped to 4:3, and full screen
+    /// is where we see all of what we send.
+    func testDoubleTappingOurInlineTileGoesFullScreen() {
+        launch("small_three")
+        ours.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4)).doubleTap()
+        XCTAssertTrue(tile("bob").waitForNonExistence(timeout: 5), "us full screen, the others gone")
+        XCTAssertTrue(ours.exists)
+    }
+    
+    /// R14: full screen is for the other people, not for our floating tile.
     func testDoubleTappingOurTileDoesNotGoFullScreenButTheirsDoes() {
         launch("one_to_one")
         ours.coordinate(withNormalizedOffset: CGVector(dx: 0.3, dy: 0.3)).doubleTap()
