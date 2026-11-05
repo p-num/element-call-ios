@@ -260,17 +260,22 @@ struct CallGenerationTests {
     
     @Test(arguments: [true, false], [true, false])
     func selectedIntentReachesTheMembershipWithoutChangingRinging(isAudioCall: Bool, isStartingCall: Bool) async throws {
-        for isDirect in [true, false] {
+        let pair = ["@alice:example.org", "@bob:example.org"]
+        let cases = [(true, pair, "ring"), (false, pair, "notification"), (true, [pair[0]], "notification")]
+        for (isDirect, joinedUserIDs, expectedNotificationType) in cases {
             let room = ElementCallFakeRoom(isDirect: isDirect)
-            let matrixRoom = HeldMatrixRoom(roomID: room.roomID)
+            let matrixRoom = HeldMatrixRoom(roomID: room.roomID, joinedUserIDs: joinedUserIDs)
             let controller = makeController(transport: HeldTransport(room: matrixRoom))
             let data = ElementCallData(isAudioCall: isAudioCall, isStartingCall: isStartingCall)
             controller.setPreviewState(callData: data, room: room, connection: .joining)
             _ = try #require(await controller.joinCall(for: data, room: room, generation: controller.callGeneration))
-            let memberships = matrixRoom.memberPublications
-            let notifications = matrixRoom.notifications
+            if isStartingCall {
+                try await waitUntil { !matrixRoom.notifications.isEmpty }
+            }
             controller.hangUp()
             try await waitUntil { controller.connection == .ended(.left) }
+            let memberships = matrixRoom.memberPublications
+            let notifications = matrixRoom.notifications
             
             let expectedIntent = isAudioCall ? "audio" : "video"
             let membership = try decode(#require(memberships.first))
@@ -278,7 +283,7 @@ struct CallGenerationTests {
             #expect(notifications.count == (isStartingCall ? 1 : 0))
             if isStartingCall {
                 let notification = try decode(#require(notifications.first))
-                #expect(notification["notification_type"] as? String == (isDirect ? "ring" : "notification"))
+                #expect(notification["notification_type"] as? String == expectedNotificationType)
                 #expect(notification["m.call.intent"] as? String == expectedIntent)
             }
         }
@@ -488,6 +493,7 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
     let publication = HeldReply<String>()
     private let delegate: ElementCallFakeMatrixRoom
     private let holdsJoin: Bool
+    private let joinedUserIDs: [String]
     private let state = Mutex(State())
     
     private struct State {
@@ -498,9 +504,10 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
         var notifications: [String] = []
     }
     
-    init(roomID: String, holdsJoin: Bool = false) {
+    init(roomID: String, holdsJoin: Bool = false, joinedUserIDs: [String] = ["@alice:example.org"]) {
         self.roomID = roomID
         self.holdsJoin = holdsJoin
+        self.joinedUserIDs = joinedUserIDs
         delegate = ElementCallFakeMatrixRoom(roomID: roomID, ownUserID: "@alice:example.org")
     }
     
@@ -526,7 +533,10 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
     }
     
     func joinedMemberIDs() -> AsyncStream<[String]> {
-        delegate.joinedMemberIDs()
+        AsyncStream { continuation in
+            continuation.yield(joinedUserIDs)
+            continuation.finish()
+        }
     }
     
     func stickyEvents() -> AsyncStream<[ElementCallRoomEvent]> {
