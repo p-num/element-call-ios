@@ -20,6 +20,8 @@ public nonisolated enum MatrixRTCEventTypes {
     public static let legacyEncryptionKey = "io.element.call.encryption_keys"
     /// Element Call's reaction and raised hand, and the spec annotation it also reads.
     public static let reactions = ["io.element.call.reaction", "m.reaction"]
+    /// MSC4310 decline of a ring, spec and unstable spellings.
+    public static let decline = ["m.rtc.decline", "org.matrix.msc4310.rtc.decline"]
     public static let redaction = "m.room.redaction"
 }
 
@@ -110,17 +112,16 @@ public nonisolated enum MatrixRTCCallIntent: String, Sendable {
     case audio, video
 }
 
-/// MSC4075 notification sent with the membership when *starting* a call.
-public nonisolated struct MatrixRTCNotify: Sendable, Hashable {
-    public enum Kind: Sendable { case ring, notification }
-    
-    public let kind: Kind
-    public let intent: MatrixRTCCallIntent
-    
-    public init(kind: Kind, intent: MatrixRTCCallIntent) {
-        self.kind = kind
-        self.intent = intent
-    }
+/// What a join is, fixed at the join. There is no default: a host that forgot to say DM would place
+/// a group call nobody's phone rings for.
+public nonisolated enum MatrixRTCCallKind: Sendable, Hashable {
+    /// Never rings. With an intent, we are starting the call and the room is told with a visual
+    /// notification.
+    case group(notify: MatrixRTCCallIntent?)
+    /// The core rings the callee, follows the call and ends it, reporting all of it through
+    /// ``MatrixRTCCall/status``. With an intent, the user chose to call; without one, they are
+    /// answering a ring or joining a call in progress.
+    case direct(ring: MatrixRTCCallIntent?)
 }
 
 public nonisolated struct MatrixRTCLeaveReason: Sendable, Hashable {
@@ -350,8 +351,52 @@ public nonisolated enum MatrixRTCFrameEncryptionState: Sendable, Hashable {
     case ok, missingKey, decryptionFailed, encryptionFailed, internalError
 }
 
+/// Where a joined call is, from the core: it combines our media with whether anybody is there to
+/// talk to, which neither side knows alone. Our media is up seconds before a DM's callee answers.
+public nonisolated enum MatrixRTCCallStatus: Sendable, Hashable {
+    /// Our media is not up yet, and there is somebody to talk to.
+    case connecting
+    /// A DM call waiting for `callee`, the user ID it rings, while our own media gets going.
+    case calling(callee: String, ring: MatrixRTCRingPhase, media: MatrixRTCMediaPhase)
+    /// Media up and somebody to talk to. `since` is the zero of the call's duration and the moment
+    /// the system call connected; it holds through a reconnect.
+    case connected(since: Date, isDegraded: Bool)
+    /// Final. Every reason but ``MatrixRTCEndReason/left`` is a leave the core already made.
+    case ended(MatrixRTCEndReason)
+    
+    public var isDegraded: Bool {
+        switch self {
+        case .calling(_, _, .connected(isDegraded: true)), .connected(_, isDegraded: true): true
+        default: false
+        }
+    }
+}
+
+public nonisolated enum MatrixRTCRingPhase: Sendable, Hashable {
+    /// Being sent: we are calling, without a ringback yet.
+    case sending
+    /// Out, and the callee's phone rings until `sentAt + lifetime`.
+    case ringing(sentAt: Date, lifetime: Duration)
+}
+
+public nonisolated enum MatrixRTCMediaPhase: Sendable, Hashable {
+    case connecting
+    case connected(isDegraded: Bool)
+}
+
 public nonisolated enum MatrixRTCEndReason: Sendable, Hashable {
+    /// We left, or the room was closed.
     case left
+    /// The callee declined our ring.
+    case declined
+    /// Nobody answered before the ring ran out.
+    case unanswered
+    /// The ring could not be sent in time.
+    case ringNotSent
+    /// Everyone else left a DM call.
+    case othersLeft
+    /// A DM call joined without a ring had nobody in it.
+    case empty
     /// The slot the call was in was closed by a room administrator; the core left on its own.
     case slotClosed
     case connectionClosed(message: String)
@@ -373,10 +418,8 @@ public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
     case handRaised(memberID: String, raisedAt: Date)
     case handLowered(memberID: String)
     case reaction(memberID: String, emoji: String, name: String)
-    case mediaConnectionDegraded(Bool)
     /// This device's publishing connection, independently of remote transport health.
     case ownMediaConnectionDegraded(Bool)
-    case ended(MatrixRTCEndReason)
 }
 
 /// Cumulative receive counters for one stream; sample twice and diff.

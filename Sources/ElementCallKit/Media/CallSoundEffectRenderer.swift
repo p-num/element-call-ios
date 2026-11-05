@@ -11,6 +11,10 @@ import Synchronization
 /// A short cue mixed over the call, as opposed to the call's own audio.
 nonisolated enum CallSoundEffect: CaseIterable, Sendable {
     case join, leave, raiseHand
+    /// What the caller hears while the other phone rings, looped until stopped (030 R23).
+    case ringback
+    /// A direct call ending because the callee declined, or because nobody answered (030 R25).
+    case declined, timeout
 }
 
 /// The call's sound effects' render path: one source node on the call's own engine, so they go
@@ -28,17 +32,34 @@ final nonisolated class CallSoundEffectRenderer: @unchecked Sendable {
     private let join: Voice
     private let leave: Voice
     private let raiseHand: Voice
+    private let ringback: Voice
+    private let declined: Voice
+    private let timeout: Voice
     
-    init(join: [Float], leave: [Float], raiseHand: [Float]) {
+    init(join: [Float], leave: [Float], raiseHand: [Float], ringback: [Float] = [], declined: [Float] = [], timeout: [Float] = []) {
         self.join = Voice(join)
         self.leave = Voice(leave)
         // Two hands close together are one sound, not a sound cut off and started again (009 R34).
         self.raiseHand = Voice(raiseHand, coalesces: true)
+        // Back to back, as web plays it (030 R23).
+        self.ringback = Voice(ringback, loops: true)
+        self.declined = Voice(declined)
+        self.timeout = Voice(timeout)
     }
     
     /// From any thread. Restarts that sound from its beginning on the next render.
     func play(_ sound: CallSoundEffect) {
         voice(for: sound).trigger()
+    }
+    
+    /// From any thread. Silences that sound on the next render, mid-way if need be (030 R23).
+    func stop(_ sound: CallSoundEffect) {
+        voice(for: sound).stop()
+    }
+    
+    /// How long one play of the sound lasts, at the engine's rate.
+    func duration(of sound: CallSoundEffect) -> Duration {
+        .seconds(Double(voice(for: sound).length) / AudioFormat.float32.sampleRate)
     }
     
     /// The block handed to the engine. It captures the renderer and nothing else.
@@ -60,6 +81,9 @@ final nonisolated class CallSoundEffectRenderer: @unchecked Sendable {
         join.mix(into: output, count: count)
         leave.mix(into: output, count: count)
         raiseHand.mix(into: output, count: count)
+        ringback.mix(into: output, count: count)
+        declined.mix(into: output, count: count)
+        timeout.mix(into: output, count: count)
         for index in 0..<count {
             output[index] = min(1, max(-1, output[index]))
         }
@@ -71,23 +95,36 @@ final nonisolated class CallSoundEffectRenderer: @unchecked Sendable {
         case .join: join
         case .leave: leave
         case .raiseHand: raiseHand
+        case .ringback: ringback
+        case .declined: declined
+        case .timeout: timeout
         }
     }
     
-    /// One sound. The trigger crosses threads as a generation count; the playhead belongs to the
-    /// render thread alone, which notices a new generation and starts over. A coalescing voice
-    /// instead lets a trigger that arrives while it plays join the sound already playing: its
-    /// cooldown is the sound's own length, read where the playhead is rather than on a clock.
+    /// One sound. A play or a stop crosses threads as a generation count, with whether the sound
+    /// is wanted beside it; the playhead belongs to the render thread alone, which notices a new
+    /// generation and starts over, or falls silent. A coalescing voice instead lets a trigger that
+    /// arrives while it plays join the sound already playing: its cooldown is the sound's own
+    /// length, read where the playhead is rather than on a clock. A looping voice starts over at
+    /// its end for as long as it is wanted.
     private final class Voice: @unchecked Sendable {
         private let samples: UnsafeMutableBufferPointer<Float>
         private let coalesces: Bool
+        private let loops: Bool
         private let requested = Atomic<UInt32>(0)
+        private let isWanted = Atomic<Bool>(false)
         // Render thread only.
         private var started: UInt32 = 0
+        private var isPlaying = false
         private var playhead: Int
         
-        init(_ source: [Float], coalesces: Bool = false) {
+        var length: Int {
+            samples.count
+        }
+        
+        init(_ source: [Float], coalesces: Bool = false, loops: Bool = false) {
             self.coalesces = coalesces
+            self.loops = loops
             samples = .allocate(capacity: source.count)
             _ = samples.initialize(from: source)
             // At the end: silent until first triggered.
@@ -98,24 +135,43 @@ final nonisolated class CallSoundEffectRenderer: @unchecked Sendable {
             samples.deallocate()
         }
         
+        /// The flag is written before the generation is published, so a render that sees the
+        /// generation sees the flag that came with it, and a play and a stop between two renders
+        /// leave whichever was last.
         func trigger() {
-            requested.wrappingAdd(1, ordering: .relaxed)
+            isWanted.store(true, ordering: .relaxed)
+            requested.wrappingAdd(1, ordering: .releasing)
+        }
+        
+        func stop() {
+            isWanted.store(false, ordering: .relaxed)
+            requested.wrappingAdd(1, ordering: .releasing)
         }
         
         func mix(into output: UnsafeMutablePointer<Float>, count: Int) {
-            let generation = requested.load(ordering: .relaxed)
+            let generation = requested.load(ordering: .acquiring)
             if generation != started {
                 started = generation
-                if !coalesces || playhead >= samples.count {
+                isPlaying = isWanted.load(ordering: .relaxed)
+                if !isPlaying {
+                    playhead = samples.count
+                } else if !coalesces || playhead >= samples.count {
                     playhead = 0
                 }
             }
-            let available = min(count, samples.count - playhead)
-            guard available > 0 else { return }
-            for index in 0..<available {
-                output[index] += samples[playhead + index] * CallSoundEffectRenderer.gain
+            var written = 0
+            while written < count {
+                if playhead >= samples.count {
+                    guard loops, isPlaying, !samples.isEmpty else { return }
+                    playhead = 0
+                }
+                let available = min(count - written, samples.count - playhead)
+                for index in 0..<available {
+                    output[written + index] += samples[playhead + index] * CallSoundEffectRenderer.gain
+                }
+                playhead += available
+                written += available
             }
-            playhead += available
         }
     }
 }
@@ -127,17 +183,22 @@ nonisolated extension CallSoundEffectRenderer {
     /// call without its join sound is still a call.
     static func bundled() async -> CallSoundEffectRenderer? {
         guard let samples = await bundledSamples.value else { return nil }
-        return CallSoundEffectRenderer(join: samples.join, leave: samples.leave, raiseHand: samples.raiseHand)
+        return CallSoundEffectRenderer(join: samples.join, leave: samples.leave, raiseHand: samples.raiseHand,
+                                       ringback: samples.ringback, declined: samples.declined, timeout: samples.timeout)
     }
     
-    /// Decoded once per process, on first use, and shared by every call after it.
-    private static let bundledSamples: Task<(join: [Float], leave: [Float], raiseHand: [Float])?, Never> = .detached(priority: .utility) {
+    private struct BundledSamples: Sendable {
+        let join, leave, raiseHand, ringback, declined, timeout: [Float]
+    }
+    
+    /// Bundle lookup belongs to the main actor; file IO and decoding do not.
+    private static let bundledSamples: Task<BundledSamples?, Never> = .detached(priority: .utility) {
         do {
-            // SwiftPM's generated Bundle.module belongs to the main actor; decoding does not.
             let urls = try await MainActor.run {
-                try (resourceURL("join_call"), resourceURL("left_call"), resourceURL("raise_hand"))
+                try ["join_call", "left_call", "raise_hand", "ringtone", "call_declined", "call_timeout"].map(resourceURL)
             }
-            return try (decode(url: urls.0), decode(url: urls.1), decode(url: urls.2))
+            return try BundledSamples(join: decode(url: urls[0]), leave: decode(url: urls[1]), raiseHand: decode(url: urls[2]),
+                                      ringback: decode(url: urls[3]), declined: decode(url: urls[4]), timeout: decode(url: urls[5]))
         } catch {
             MatrixRTCLog.error("Failed to decode the call sounds: \(error)")
             return nil

@@ -195,7 +195,7 @@ struct CallGenerationTests {
         #expect(oldCore.leaveCount == 1)
         
         oldCore.answerLeave()
-        try await waitUntil { controller.rtcCall == nil && system.requests.contains(.end(roomID: room.roomID)) }
+        try await waitUntil { controller.rtcCall == nil && system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         #expect(controller.lastDeparture?.result == .confirmed)
         controller.startCall(.init(isAudioCall: true, isStartingCall: false), room: room)
         #expect(controller.callGeneration != generation)
@@ -204,7 +204,7 @@ struct CallGenerationTests {
         // Hold B before it opens a room: this test needs no SFU or media connection.
         try await waitUntil { system.start.isPending }
         controller.hangUp()
-        try await waitUntil { controller.connection == .ended }
+        try await waitUntil { controller.connection == .ended(.left) }
         system.start.answer(())
         #expect(oldCore.leaveCount == 1)
         #expect(transport.openCount == 0)
@@ -228,7 +228,7 @@ struct CallGenerationTests {
         #expect(controller.connection == .failed("Media failed"))
         try await waitUntil { core.hasPendingLeave }
         core.answerLeave()
-        try await waitUntil { controller.rtcCall == nil && system.requests.contains(.end(roomID: room.roomID)) }
+        try await waitUntil { controller.rtcCall == nil && system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         #expect(core.leaveCount == 1)
         controller.reset()
         #expect(controller.connection == .idle)
@@ -260,17 +260,22 @@ struct CallGenerationTests {
     
     @Test(arguments: [true, false], [true, false])
     func selectedIntentReachesTheMembershipWithoutChangingRinging(isAudioCall: Bool, isStartingCall: Bool) async throws {
-        for isDirect in [true, false] {
+        let pair = ["@alice:example.org", "@bob:example.org"]
+        let cases = [(true, pair, "ring"), (false, pair, "notification"), (true, [pair[0]], "notification")]
+        for (isDirect, joinedUserIDs, expectedNotificationType) in cases {
             let room = ElementCallFakeRoom(isDirect: isDirect)
-            let matrixRoom = HeldMatrixRoom(roomID: room.roomID)
+            let matrixRoom = HeldMatrixRoom(roomID: room.roomID, joinedUserIDs: joinedUserIDs)
             let controller = makeController(transport: HeldTransport(room: matrixRoom))
             let data = ElementCallData(isAudioCall: isAudioCall, isStartingCall: isStartingCall)
             controller.setPreviewState(callData: data, room: room, connection: .joining)
             _ = try #require(await controller.joinCall(for: data, room: room, generation: controller.callGeneration))
+            if isStartingCall {
+                try await waitUntil { !matrixRoom.notifications.isEmpty }
+            }
+            controller.hangUp()
+            try await waitUntil { controller.connection == .ended(.left) }
             let memberships = matrixRoom.memberPublications
             let notifications = matrixRoom.notifications
-            controller.hangUp()
-            try await waitUntil { controller.connection == .ended }
             
             let expectedIntent = isAudioCall ? "audio" : "video"
             let membership = try decode(#require(memberships.first))
@@ -278,7 +283,7 @@ struct CallGenerationTests {
             #expect(notifications.count == (isStartingCall ? 1 : 0))
             if isStartingCall {
                 let notification = try decode(#require(notifications.first))
-                #expect(notification["notification_type"] as? String == (isDirect ? "ring" : "notification"))
+                #expect(notification["notification_type"] as? String == expectedNotificationType)
                 #expect(notification["m.call.intent"] as? String == expectedIntent)
             }
         }
@@ -290,7 +295,7 @@ struct CallGenerationTests {
         let client = MatrixRTCClient(transport: HeldTransport(room: matrixRoom))
         let room = try await client.room(roomID: matrixRoom.roomID, format: .roomState)
         // The existing source call remains valid and the core supplies its notification fallback.
-        let call = try await room.joinCall(notify: .init(kind: .ring, intent: .audio))
+        let call = try await room.joinCall(kind: .direct(ring: .audio))
         let memberships = matrixRoom.memberPublications
         let departure = await call.leave()
         await room.shutdown()
@@ -322,7 +327,7 @@ struct CallGenerationTests {
             try await waitUntil { matrixRoom.publication.isPending }
             matrixRoom.publication.fail()
         }
-        try await waitUntil { system.requests.contains(.end(roomID: room.roomID)) }
+        try await waitUntil { system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         
         let expected = failsToOpenRoom ? strings.callPreparationFailed : strings.callJoinFailed
         #expect(controller.connection == .failed(expected))
@@ -352,7 +357,7 @@ struct CallGenerationTests {
         try await waitUntil { transport.hasPendingPublish }
         transport.answerPublish(failingWith: MatrixRTCError.media("MIC_CAPTURE_FIXTURE"))
         await startup.value
-        try await waitUntil { system.requests.contains(.end(roomID: room.roomID)) }
+        try await waitUntil { system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         
         #expect(controller.connection == .failed(strings.microphoneStartFailed))
         #expect(logger.messages.contains { $0.contains("Microphone failed:") && $0.contains("MIC_CAPTURE_FIXTURE") })
@@ -488,6 +493,7 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
     let publication = HeldReply<String>()
     private let delegate: ElementCallFakeMatrixRoom
     private let holdsJoin: Bool
+    private let joinedUserIDs: [String]
     private let state = Mutex(State())
     
     private struct State {
@@ -498,9 +504,10 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
         var notifications: [String] = []
     }
     
-    init(roomID: String, holdsJoin: Bool = false) {
+    init(roomID: String, holdsJoin: Bool = false, joinedUserIDs: [String] = ["@alice:example.org"]) {
         self.roomID = roomID
         self.holdsJoin = holdsJoin
+        self.joinedUserIDs = joinedUserIDs
         delegate = ElementCallFakeMatrixRoom(roomID: roomID, ownUserID: "@alice:example.org")
     }
     
@@ -526,7 +533,10 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
     }
     
     func joinedMemberIDs() -> AsyncStream<[String]> {
-        delegate.joinedMemberIDs()
+        AsyncStream { continuation in
+            continuation.yield(joinedUserIDs)
+            continuation.finish()
+        }
     }
     
     func stickyEvents() -> AsyncStream<[ElementCallRoomEvent]> {
@@ -623,8 +633,12 @@ private final class HeldSystem: ElementCallSystemProvidingProtocol {
         delegate.reportConnected(roomID: roomID)
     }
     
-    func endCall(roomID: String) {
-        delegate.endCall(roomID: roomID)
+    func reportDisconnected(roomID: String) {
+        delegate.reportDisconnected(roomID: roomID)
+    }
+    
+    func endCall(roomID: String, reason: ElementCallEndReason) {
+        delegate.endCall(roomID: roomID, reason: reason)
     }
     
     func setMicrophoneEnabled(_ enabled: Bool, roomID: String) {

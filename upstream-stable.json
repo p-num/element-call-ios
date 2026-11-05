@@ -1,0 +1,21 @@
+{
+  "upstream": {
+    "repository": "element-hq/element-call-ios",
+    "tag": "0.1.0-rc.11",
+    "commit": "d77b4ee326582083cabe53ffbd872a751c3cb989"
+  },
+  "consumer_release": "element-x-ios release/26.10.8",
+  "published_pins_retained": {
+    "matrix_sdk": "26.09.22-letro.1..<100.0.0 from git.postnumber.com/letro/matrix-rust-components-swift",
+    "matrix_rust_rtc": "0.5.0-rc.4-letro.3"
+  },
+  "validation": {
+    "format_and_lint": "passed",
+    "swift_syntax": "148 source/test files parsed",
+    "generated_rtc_interface": "compiled for arm64 iOS Simulator",
+    "kit_host_ui_interfaces": "compiled for arm64 iOS Simulator with actor isolation enabled",
+    "focused_test_interfaces": "seven focused test/support files typechecked with the real Swift Testing macros",
+    "runtime_and_snapshots": "pending matching media-enabled RTC artifact"
+  },
+  "release_gate": "Publish the merged Letro RTC engine, update its pin here, and run linked package tests/snapshots before a host adopts this source."
+}

@@ -42,6 +42,9 @@ targets:
         INFOPLIST_KEY_UIApplicationSceneManifest_Generation: YES
         INFOPLIST_KEY_UILaunchScreen_Generation: YES
         INFOPLIST_KEY_UISupportedInterfaceOrientations: UIInterfaceOrientationPortrait UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight
+        # The ringing fixtures run the call's real audio engine, to be heard, and starting it turns
+        # on voice processing, which is the microphone. Nothing is recorded or sent.
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: The ringing fixtures play the call's sounds through the call's own audio, which uses the microphone.
         TARGETED_DEVICE_FAMILY: "1,2"
 
   ElementCallExampleUITests:

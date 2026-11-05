@@ -123,6 +123,22 @@ struct ElementCallChromeVisibilityTests {
         #expect(chrome(.stageAppeared(isLandscape: false), .tap, .restored).isVisible)
     }
     
+    @Test("Ringing holds it up through a tap, a rotation and landscape's start (030 R19)")
+    func ringingHoldsTheChrome() {
+        #expect(chrome(.ringingStarted, .stageAppeared(isLandscape: true)).isVisible)
+        #expect(chrome(.ringingStarted, .stageAppeared(isLandscape: false), .tap).isVisible)
+        #expect(chrome(.ringingStarted, .stageAppeared(isLandscape: false), .rotated(isLandscape: true)).isVisible)
+        // Shown again by the ring even after the user had hidden it.
+        #expect(chrome(.stageAppeared(isLandscape: false), .tap, .ringingStarted).isVisible)
+    }
+    
+    @Test("The pickup gives the call its own starting state (030 R19)")
+    func pickupStartsTheCall() {
+        #expect(!chrome(.ringingStarted, .stageAppeared(isLandscape: true), .pickedUp(isLandscape: true)).isVisible)
+        #expect(chrome(.ringingStarted, .stageAppeared(isLandscape: false), .pickedUp(isLandscape: false)).isVisible)
+        #expect(!chrome(.ringingStarted, .pickedUp(isLandscape: false), .tap).isVisible)
+    }
+    
     @Test("A pinned preview ignores the resets, so both renders of it show one state")
     func pinned() {
         var shown = ElementCallChromeVisibility.pinned(isVisible: true)

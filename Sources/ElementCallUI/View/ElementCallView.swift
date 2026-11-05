@@ -30,6 +30,8 @@ struct ElementCallView: View {
     /// A single tap waiting out ``chromeTapDelay`` before it toggles anything. A second tap within
     /// that is the other half of a double tap, and cancels it.
     @State private var isChromeTapPending = false
+    /// The ringing avatar is what the screen is about, so a screen reader starts there (030 R22).
+    @AccessibilityFocusState private var isRingingAvatarFocused: Bool
     let pictureInPictureSourceView: UIView
     /// Read at render time: the call exists only once media is connected.
     let callProvider: () -> MatrixRTCMediaSession?
@@ -99,11 +101,19 @@ struct ElementCallView: View {
             .animation(.easeInOut(duration: 0.2), value: context.isFullscreenChromeVisible)
             .animation(.easeInOut(duration: 0.25), value: context.viewState.isScreenSharing)
             .animation(.easeInOut(duration: 0.3), value: isStageShown)
+            .animation(.easeInOut(duration: 0.3), value: context.viewState.isRinging)
             .frame(width: geometry.size.width, height: geometry.size.height)
             // In landscape the status bar goes with the chrome; in portrait it stays (R8, R9).
             .statusBarHidden(fullscreenTile != nil ? !context.isFullscreenChromeVisible : isTopBarHideable(isLandscape: isLandscape) && !isStageChromeVisible)
             .onChange(of: isLandscape) { _, isLandscape in
                 applyStageChrome(.rotated(isLandscape: isLandscape))
+            }
+            .onChange(of: context.viewState.isRinging, initial: true) { wasRinging, isRinging in
+                if isRinging {
+                    applyStageChrome(.ringingStarted)
+                } else if wasRinging {
+                    applyStageChrome(.pickedUp(isLandscape: isLandscape))
+                }
             }
         }
         .environment(\.colorScheme, .dark)
@@ -455,17 +465,37 @@ struct ElementCallView: View {
             Text("Joining…").font(style.theme.bodySM).foregroundStyle(style.theme.textSecondary)
         case .connectingMedia:
             Text("Connecting…").font(style.theme.bodySM).foregroundStyle(style.theme.textSecondary)
+        case .calling:
+            HStack(spacing: 4) {
+                style.icons.icon(context.viewState.isAudioCall ? .voiceCall : .videoCall, size: .xSmall, relativeTo: .bodySM)
+                    .accessibilityHidden(true)
+                Text(style.strings.calling)
+            }
+            .font(style.theme.bodySM)
+            .foregroundStyle(style.theme.textSecondary)
         case .connected:
             if let connectedAt = context.viewState.connectedAt {
                 Text(connectedAt, style: .timer)
                     .font(style.theme.bodySM)
-                    .foregroundStyle(context.viewState.isMediaDegraded ? style.theme.textCriticalPrimary : style.theme.textSecondary)
+                    .foregroundStyle(durationColour)
                     .monospacedDigit()
             }
         case .ended:
             Text("Call ended").font(style.theme.bodySM).foregroundStyle(style.theme.textSecondary)
         case .failed(let message):
             Text(message).font(style.theme.bodySM).foregroundStyle(style.theme.textCriticalPrimary).lineLimit(2)
+        }
+    }
+    
+    /// A direct call's duration sits over the other person's picture or the scrim on it, where the
+    /// secondary grey all but disappears; elsewhere the band behind the top bar is the canvas.
+    private var durationColour: Color {
+        if context.viewState.isMediaDegraded {
+            style.theme.textCriticalPrimary
+        } else if context.viewState.isDirect {
+            style.theme.textPrimary
+        } else {
+            style.theme.textSecondary
         }
     }
     
@@ -488,11 +518,22 @@ struct ElementCallView: View {
         // answers exactly that case with a spinner there is no way out of. The own tile is spliced
         // in unconditionally so the list is not actually empty here, but the invariant should not be
         // the only thing standing between a user alone in a call and a permanent loading screen.
-        if state.connection != .connected, state.tiles.isEmpty {
-            ProgressView()
-                .tint(style.theme.iconPrimary)
-                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        //
+        // Nor does a ringing call wait on screen: the callee's avatar is the stage, with our own
+        // tile over it once our media is up (030 R15, R16).
+        if let callee = state.callee {
+            ElementCallRingingAvatar(callee: callee, fallbackName: state.roomName)
+                .accessibilityFocused($isRingingAvatarFocused)
+                .onAppear { isRingingAvatarFocused = true }
                 .transition(.opacity)
+        }
+        if state.connection != .connected, state.tiles.isEmpty {
+            if !state.isRinging {
+                ProgressView()
+                    .tint(style.theme.iconPrimary)
+                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                    .transition(.opacity)
+            }
         } else {
             ElementCallStage(tiles: state.tiles,
                              spotlightID: state.spotlightID,
@@ -501,6 +542,7 @@ struct ElementCallView: View {
                              floatingInsets: floatingInsets(isLandscape: isLandscape),
                              extendsUnderSideSafeAreas: isFullBleed,
                              ownCorner: context.ownTileCorner,
+                             isDirect: state.isDirect,
                              canSwitchCamera: state.canSwitchCamera,
                              isFrontCamera: state.isFrontCamera,
                              scrollRequest: context.scrollRequest,
@@ -587,6 +629,18 @@ struct ElementCallView_Previews: PreviewProvider, TestablePreview {
                                                             ElementCallPreviewFixtures.bob],
                                                     isDirect: true))
             .previewDisplayName("Two people")
+        // Bob speaking with his camera off: the sound waves round his avatar.
+        screen(ElementCallPreviewFixtures.connected(tiles: [ElementCallPreviewFixtures.alice,
+                                                            ElementCallPreviewFixtures.tile("Bob", isSpeaking: true)],
+                                                    isDirect: true))
+            .previewDisplayName("Two people, speaking")
+        // A direct call ringing (030): the callee's avatar, our tile over it, the chrome held up.
+        screen(ElementCallPreviewFixtures.ringing())
+            .previewDisplayName("Ringing")
+        screen(ElementCallPreviewFixtures.ringing(isMediaUp: false))
+            .previewDisplayName("Ringing, our media connecting")
+        screen(ElementCallPreviewFixtures.ringing(isAudioCall: true))
+            .previewDisplayName("Ringing a voice call")
         screen(ElementCallPreviewFixtures.connected(tiles: ElementCallPreviewFixtures.listenModeGroup))
             .previewDisplayName("Listen mode")
         screen(ElementCallPreviewFixtures.connected(tiles: ElementCallPreviewFixtures.twoSharesGroup))

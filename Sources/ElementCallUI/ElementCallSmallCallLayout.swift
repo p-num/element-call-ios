@@ -93,6 +93,7 @@ enum ElementCallSmallCallLayout {
         let remote = remote(input.tiles)
         let ranks = Dictionary(uniqueKeysWithValues: input.tiles.filter { !$0.isLocal }.enumerated().map { ($1.id, $0) })
         let isFloating = own != nil && remote.count <= 1
+        let isOwnTileShown = own.map { isFloatingTileShown(hasVideo: $0.hasVideo, isAlone: remote.isEmpty, isDirect: input.isDirect) } ?? false
         
         var placements = [ElementCallTilePlacement]()
         func place(_ tile: ElementCallTile, _ frame: CGRect, _ appearance: ElementCallTileAppearance, zIndex: Double = 0, fit: ElementCallTileFit = .standard) {
@@ -121,13 +122,14 @@ enum ElementCallSmallCallLayout {
             }
         }
         
-        if isFloating, let own {
+        if isFloating, isOwnTileShown, let own {
             let size = floatingSize(hasVideo: own.hasVideo, videoAspect: input.ownVideoAspect, isLandscape: metrics.isLandscape)
             place(own, floatingFrame(corner: input.ownCorner, size: size, metrics: metrics, insets: input.floatingInsets), .floating, zIndex: floatingZIndex)
         }
         
-        // R27: remote tiles by arrival, then ourselves; ourselves first when drawn first.
-        let ownID = own.map { [$0.id] } ?? []
+        // R27: remote tiles by arrival, then ourselves; ourselves first when drawn first. A hidden
+        // floating tile is not on the stage, so a screen reader skips it.
+        let ownID = own.map { isFloating && !isOwnTileShown ? [] : [$0.id] } ?? []
         let remoteIDs = remote.map(\.id)
         return ElementCallStageLayout(placements: placements,
                                       contentHeight: viewport.height,
@@ -135,6 +137,8 @@ enum ElementCallSmallCallLayout {
                                       detailWindow: .init(ranks: 0..<ranks.count, also: []),
                                       heroStack: nil,
                                       pictureInPictureTileID: pictureInPictureTile(tiles: input.tiles, speakerID: input.speakerID),
+                                      // Named, or nothing would stop drawing what it no longer shows.
+                                      hiddenTileIDs: isFloating && !isOwnTileShown ? Set(own.map { [$0.id] } ?? []) : [],
                                       isStatic: true,
                                       readingOrder: isFloating ? remoteIDs + ownID : ownID + remoteIDs)
     }
@@ -207,6 +211,14 @@ enum ElementCallSmallCallLayout {
     }
     
     // MARK: - Our own floating tile
+    
+    /// Our floating tile shows our camera, so with the camera off it is not on the stage: an avatar
+    /// of ourselves in the corner said nothing and covered the picture. Except alone in a call that
+    /// is not a direct chat, where it is the only sign the call is ours to be in; alone in a direct
+    /// chat, the person being called is on the stage instead (030 R17).
+    nonisolated static func isFloatingTileShown(hasVideo: Bool, isAlone: Bool, isDirect: Bool) -> Bool {
+        hasVideo || (isAlone && !isDirect)
+    }
     
     /// R10, R17, R28: a square avatar with the camera off, otherwise the shape of the picture.
     /// Before the first frame the stage's own orientation stands in for it, since our capture is

@@ -12,82 +12,6 @@ import Testing
 
 @MainActor
 struct DirectCallLifecycleTests {
-    @Test(arguments: [true, false])
-    func onlyDirectCallsLeaveAfterTheOtherUserLeaves(isDirect: Bool) async throws {
-        let (controller, call, core) = makeCall(isDirect: isDirect)
-        call.updateMembers([member("me"), member("peer")])
-        call.updateMembers([member("me")])
-        if isDirect {
-            try await waitUntil { controller.connection == .ended }
-            #expect(core.leaveCount == 1)
-            #expect(controller.lastDeparture?.result == .confirmed)
-        } else {
-            await drain()
-            #expect(controller.connection == .connected)
-            #expect(core.leaveCount == 0)
-            controller.hangUp()
-            try await waitUntil { controller.connection == .ended }
-        }
-    }
-    
-    @Test
-    func beingAloneOrJoiningWithAnotherOwnDeviceDoesNotEndTheCall() async throws {
-        let (controller, call, core) = makeCall()
-        call.updateMembers([])
-        call.updateMembers([member("me")])
-        call.updateMembers([member("me"), member("me", device: "two")])
-        call.updateMembers([member("me")])
-        await drain()
-        #expect(controller.connection == .connected)
-        #expect(core.leaveCount == 0)
-        controller.hangUp()
-        try await waitUntil { controller.connection == .ended }
-    }
-    
-    @Test
-    func theLastPeerDeviceMustLeaveAndOurOtherDeviceDoesNotKeepUsThere() async throws {
-        let (controller, call, core) = makeCall()
-        call.updateMembers([member("me"), member("peer"), member("peer", device: "two")])
-        call.updateMembers([member("me"), member("me", device: "two"), member("peer", device: "two")])
-        await drain()
-        #expect(controller.connection == .connected)
-        #expect(core.leaveCount == 0)
-        call.updateMembers([member("me"), member("me", device: "two")])
-        try await waitUntil { controller.connection == .ended }
-        #expect(core.leaveCount == 1)
-    }
-    
-    @Test
-    func replacingThePeerDeviceAndTransportChangesDoNotEndMembership() async throws {
-        let (controller, call, core) = makeCall()
-        call.updateMembers([member("me"), member("peer")])
-        call.updateMembers([member("me"), member("peer", device: "two")])
-        // A reconnect changes the media roster, not the Matrix membership feed.
-        call.updateMembers([member("me"), member("peer", device: "two")])
-        await drain()
-        #expect(controller.connection == .connected)
-        #expect(core.leaveCount == 0)
-        controller.hangUp()
-        try await waitUntil { controller.connection == .ended }
-    }
-    
-    @Test
-    func anOldCallCannotEndItsReplacement() async throws {
-        let (controller, oldCall, oldCore) = makeCall()
-        oldCall.updateMembers([member("me"), member("peer")])
-        await drain()
-        let replacement = MatrixRTCCall(rtcCall: FakeRtcCall())
-        controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
-                                   room: ElementCallFakeRoom(), connection: .connected, rtcCall: replacement)
-        oldCall.updateMembers([member("me")])
-        await drain()
-        #expect(controller.rtcCall === replacement)
-        #expect(controller.connection == .connected)
-        #expect(oldCore.leaveCount == 0)
-        controller.hangUp()
-        try await waitUntil { controller.connection == .ended }
-    }
-    
     @Test
     func membershipObserversReceiveIndependentOrderedSnapshotsAndFinish() async {
         let call = MatrixRTCCall(rtcCall: FakeRtcCall())
@@ -128,7 +52,7 @@ struct DirectCallLifecycleTests {
         #expect(core.leaveCount == 1)
         #expect(dismissals == 0)
         core.answerLeave()
-        try await waitUntil { controller.connection == .ended }
+        try await waitUntil { controller.connection == .ended(.left) }
         await drain()
         #expect(dismissals == 1)
         #expect(controller.lastDeparture?.result == .confirmed)
@@ -158,7 +82,7 @@ struct DirectCallLifecycleTests {
         let call = MatrixRTCCall(rtcCall: core)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),
                                    room: ElementCallFakeRoom(), connection: .connected, rtcCall: call)
-        controller.observeDirectCallMembership(call, isDirect: isDirect)
+        controller.follow(call, roomID: call.roomID)
         return (controller, call, core)
     }
     

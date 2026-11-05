@@ -193,6 +193,8 @@ struct ElementCallStageLayout: Equatable {
         /// Our own picture's upright width over height, once one has been drawn.
         var ownVideoAspect: CGFloat?
         var floatingInsets = ElementCallSmallCallLayout.FloatingInsets.zero
+        /// A direct chat, where our camera-off tile is hidden even when we are alone.
+        var isDirect = false
     }
     
     /// What the layout asks the core for full records of: a rank range over the remote order for

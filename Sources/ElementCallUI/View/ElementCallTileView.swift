@@ -124,6 +124,10 @@ struct ElementCallTileView: View, Equatable {
     
     /// The design's avatar on a grid tile.
     static let gridAvatarDiameter: CGFloat = 52
+    /// The design's avatar on a tile that fills the stage or a slot of its own: the spotlight, full
+    /// screen and a one-to-one call. The ringing avatar is drawn at it too, so the change to the call
+    /// at the pickup is one avatar handing over to an identical one (030 R21).
+    static let largeAvatarDiameter: CGFloat = 140
     
     private var cornerRadius: CGFloat {
         switch appearance {
@@ -134,7 +138,7 @@ struct ElementCallTileView: View, Equatable {
     }
     
     private var isLarge: Bool {
-        isSpotlight || appearance == .fullscreen
+        isSpotlight || appearance == .fullscreen || appearance == .fullBleed
     }
     
     var body: some View {
@@ -249,6 +253,9 @@ struct ElementCallTileView: View, Equatable {
                         .id(tile.id)
                 }
             } else {
+                if appearance == .fullBleed {
+                    ElementCallSoundWaves(isSpeaking: tile.isSpeaking, avatarDiameter: Self.largeAvatarDiameter)
+                }
                 avatar
             }
         }
@@ -337,21 +344,19 @@ struct ElementCallTileView: View, Equatable {
                 })
     }
     
-    /// One `.full` avatar at every size, scaled down in the grid, rather than `.thumbnail` there. A
-    /// tile changes size inside an animation, and a different view per size would be re-laid out
-    /// mid-move, where a frame interpolates and a font size does not. A scale is a render transform,
-    /// so the avatar moves as one picture whatever the host draws in it.
+    /// One `.full` avatar at every size, scaled to the size the design gives it, rather than
+    /// `.thumbnail` in the grid. A tile changes size inside an animation, and a different view per
+    /// size would be re-laid out mid-move, where a frame interpolates and a font size does not: the
+    /// letter ran at its own speed beside the circle. A scale is a render transform, so the avatar
+    /// moves as one picture whatever the host draws in it, and is the design's size whatever size the
+    /// host draws it at.
     private var avatar: some View {
-        // Read from the view's own geometry as it draws, not measured into state: a measurement
-        // lands a pass late, and a one-pass render (a snapshot) never sees it.
-        let diameter: CGFloat? = isLarge ? nil : Self.gridAvatarDiameter
+        let diameter = isLarge ? Self.largeAvatarDiameter : Self.gridAvatarDiameter
         return style.avatars.avatar(userID: tile.userID,
                                     displayName: tile.displayName,
                                     avatarURL: tile.avatarURL,
                                     size: .full)
-            .visualEffect { content, geometry in
-                content.scaleEffect(diameter.map { $0 / max(1, geometry.size.width) } ?? 1)
-            }
+            .scaledAvatar(to: diameter)
     }
     
     private var cardChrome: some View {
@@ -460,7 +465,8 @@ struct ElementCallTileView: View, Equatable {
             EmptyView()
         } else if tile.isSpeaking, appearance == .card || appearance == .floating, !isSpotlight {
             // Not the spotlight, whose position already says who is talking, nor the one other
-            // person in a one-to-one call, who can be no one else. A small call's other tiles are
+            // person in a one-to-one call, whose picture has no edge to ring: they have sound waves
+            // round their avatar instead (`ElementCallSoundWaves`). A small call's other tiles are
             // ringed like the grid's (019 R9). Speaking wins over a raised hand, which still has
             // its badge.
             ring(style.theme.activeSpeakerBorder(in: size))
@@ -672,5 +678,21 @@ struct ElementCallTileView_Previews: PreviewProvider, TestablePreview {
         // Bare on purpose: its chrome is ``ElementCallFullscreenChrome``, drawn by the screen.
         tileView(Fixtures.carol, appearance: .fullscreen)
             .previewDisplayName("Full screen")
+    }
+}
+
+extension View {
+    /// The host's avatar scaled to `diameter`, read from the view's own geometry as it draws rather
+    /// than measured into state: a measurement lands a pass late, and a one-pass render (a snapshot)
+    /// never sees it.
+    ///
+    /// Framed at `diameter` too, because a scale draws smaller without taking less room: the host's
+    /// 140 pt avatar, scaled to 52, still asked for 140 pt and pushed our 100 pt camera-off tile
+    /// wider than its frame and off the screen's edge.
+    func scaledAvatar(to diameter: CGFloat) -> some View {
+        visualEffect { content, geometry in
+            content.scaleEffect(diameter / max(1, geometry.size.width))
+        }
+        .frame(width: diameter, height: diameter)
     }
 }

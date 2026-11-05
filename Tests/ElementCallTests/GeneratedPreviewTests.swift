@@ -25,13 +25,6 @@ extension PreviewTests {
         }
     }
 
-    @Test("ElementCallPlaceholderView")
-    func elementCallPlaceholderView() async throws {
-        for (index, preview) in ElementCallPlaceholderView_Previews._allPreviews.enumerated() {
-            try await assertSnapshots(matching: preview, step: index)
-        }
-    }
-
     @Test("ElementCallStage")
     func elementCallStage() async throws {
         for (index, preview) in ElementCallStage_Previews._allPreviews.enumerated() {

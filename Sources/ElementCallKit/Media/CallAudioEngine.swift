@@ -159,7 +159,39 @@ final nonisolated class CallAudioEngine: @unchecked Sendable {
         }
     }
     
-    /// Tears the whole graph down in one hop, for hang-up.
+    /// Takes out what media put in — the microphone sink and every member — in one hop, and leaves
+    /// the sound effects playing: the engine is the call's, from the join, and a call that ends by
+    /// a decline still has its sound to finish after media is gone (030 R25).
+    ///
+    /// Stopped around the detach rather than detaching from a running graph, for the reason
+    /// ``shutdown()`` gives; the sounds pause for that hop and pick up where they were.
+    func releaseMedia() {
+        queue.async { [weak self] in
+            guard let self else { return }
+            let wasRunning = isRunning
+            if isRunning {
+                engine.stop()
+                isRunning = false
+            }
+            if let sinkNode {
+                engine.detach(sinkNode)
+                self.sinkNode = nil
+            }
+            for node in sourceNodes.values {
+                engine.detach(node)
+            }
+            sourceNodes.removeAll()
+            renderBlocks.removeAll()
+            inputReceiver = nil
+            if wasRunning {
+                startNow()
+            }
+            MatrixRTCLog.info("Audio engine released media")
+        }
+    }
+    
+    /// Tears the whole graph down in one hop, at the end of the call: straight after a hang-up, and
+    /// once the end sound has played after a decline or a timeout.
     ///
     /// Detaching ten remote members one call at a time is ten graph reconfigurations, each able to
     /// post its own configuration-change notification while the previous one is still settling.

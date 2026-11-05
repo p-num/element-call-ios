@@ -83,6 +83,7 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         case .switchCamera: "\(prefix).switchCamera"
         case .raisedHand: "\(prefix).raisedHand"
         case .userProfile: "\(prefix).userProfile"
+        case .voiceCall: "\(prefix).voiceCall"
         }
     }
 }

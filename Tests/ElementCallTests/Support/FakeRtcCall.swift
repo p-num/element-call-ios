@@ -10,10 +10,10 @@ import MatrixRtc
 import Synchronization
 
 /// A membership that holds each hand request until the test answers it, so the time between a tap
-/// and the homeserver's reply is something a test can stand in.
+/// and the homeserver's reply is something a test can stand in, and reports whatever status the
+/// test pushes.
 ///
-/// Everything but the hand is inert. Nothing calls `start()` on a call built over this, so the
-/// roster subscription is never asked for.
+/// Everything else is inert: there is no roster.
 final class FakeRtcCall: RtcCallProtocol, Sendable {
     enum HandRequest: Equatable {
         case raise
@@ -32,14 +32,6 @@ final class FakeRtcCall: RtcCallProtocol, Sendable {
     private let state = Mutex(State())
     private let holdsLeave: Bool
     
-    init(holdsLeave: Bool = false) {
-        self.holdsLeave = holdsLeave
-    }
-    
-    var leaveCount: Int {
-        state.withLock { $0.leaveCount }
-    }
-    
     var hasPendingLeave: Bool {
         state.withLock { $0.pendingLeave != nil }
     }
@@ -56,9 +48,21 @@ final class FakeRtcCall: RtcCallProtocol, Sendable {
         }
     }
     
+    private let initialStatus: FfiCallStatus
+    let statusSubscription = FakeStatusSubscription()
+    
+    init(status: FfiCallStatus = .connected(sinceMs: 0, degraded: false), holdsLeave: Bool = false) {
+        self.holdsLeave = holdsLeave
+        initialStatus = status
+    }
+    
     /// Every hand request made, answered or not.
     var requests: [HandRequest] {
         state.withLock { $0.requests }
+    }
+    
+    var leaveCount: Int {
+        state.withLock { $0.leaveCount }
     }
     
     var hasPendingRequest: Bool {
@@ -138,11 +142,72 @@ final class FakeRtcCall: RtcCallProtocol, Sendable {
         ""
     }
     
+    func status() -> FfiCallStatus {
+        initialStatus
+    }
+    
+    func subscribeStatus() -> CallStatusSubscription {
+        statusSubscription
+    }
+    
     func subscribeMembershipSnapshots() async -> MembershipSnapshotSubscription {
-        fatalError("A call over FakeRtcCall is never started")
+        EmptyMembershipSubscription(noPointer: .init())
     }
     
     func waitForEnd() async -> FfiLeaveReason {
         fatalError("A call over FakeRtcCall is never started")
+    }
+}
+
+/// Answers each `next()` with the next pushed status, waiting for one when there is none yet, as the
+/// core's does. A pushed nil ends it.
+final nonisolated class FakeStatusSubscription: CallStatusSubscription {
+    private struct State {
+        var queued: [FfiCallStatus?] = []
+        var pending: CheckedContinuation<FfiCallStatus?, Never>?
+    }
+    
+    private let state = Mutex(State())
+    
+    init() {
+        super.init(noPointer: .init())
+    }
+    
+    required init(unsafeFromRawPointer pointer: UnsafeMutableRawPointer) {
+        fatalError("A fake has no Rust object behind it")
+    }
+    
+    func push(_ status: FfiCallStatus?) {
+        let pending = state.withLock { state in
+            guard let pending = state.pending else {
+                state.queued.append(status)
+                return nil as CheckedContinuation<FfiCallStatus?, Never>?
+            }
+            state.pending = nil
+            return pending
+        }
+        pending?.resume(returning: status)
+    }
+    
+    override func next() async -> FfiCallStatus? {
+        await withCheckedContinuation { continuation in
+            let ready = state.withLock { state -> FfiCallStatus?? in
+                guard !state.queued.isEmpty else {
+                    state.pending = continuation
+                    return nil
+                }
+                return .some(state.queued.removeFirst())
+            }
+            if let ready {
+                continuation.resume(returning: ready)
+            }
+        }
+    }
+}
+
+/// Ends on the first read, as the core's does once the room has gone.
+final nonisolated class EmptyMembershipSubscription: MembershipSnapshotSubscription {
+    override func next() async -> [JoinedMembership]? {
+        nil
     }
 }

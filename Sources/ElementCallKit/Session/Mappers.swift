@@ -40,13 +40,70 @@ nonisolated extension MatrixRTCMembershipFormat {
     }
 }
 
-nonisolated extension MatrixRTCNotify {
-    var ffi: FfiNotifyConfig {
-        FfiNotifyConfig(notificationType: kind == .ring ? .ring : .notification,
-                        intent: intent.rawValue,
-                        lifetimeMs: nil,
-                        mentionUserIds: [],
-                        mentionRoom: false)
+nonisolated extension MatrixRTCCallKind {
+    var ffi: FfiCallKind {
+        switch self {
+        case .group(let notify):
+            .group(notify: notify.map { FfiGroupNotify(intent: $0.rawValue, lifetimeMs: nil, mentionUserIds: [], mentionRoom: true) })
+        case .direct(let ring):
+            .direct(ring: ring.map { FfiRingConfig(lifetimeMs: nil, intent: $0.rawValue) })
+        }
+    }
+}
+
+nonisolated extension MatrixRTCCallStatus {
+    init(_ status: FfiCallStatus) {
+        switch status {
+        case .connecting:
+            self = .connecting
+        case .calling(let callee, let ring, let media):
+            self = .calling(callee: callee, ring: .init(ring), media: .init(media))
+        case .connected(let sinceMs, let degraded):
+            self = .connected(since: Date(milliseconds: sinceMs), isDegraded: degraded)
+        case .ended(let reason):
+            self = .ended(.init(reason))
+        }
+    }
+}
+
+nonisolated extension MatrixRTCRingPhase {
+    init(_ phase: FfiRingPhase) {
+        switch phase {
+        case .sending:
+            self = .sending
+        case .ringing(let sentAtMs, let lifetimeMs):
+            self = .ringing(sentAt: Date(milliseconds: sentAtMs), lifetime: .milliseconds(lifetimeMs))
+        }
+    }
+}
+
+nonisolated extension MatrixRTCMediaPhase {
+    init(_ phase: FfiMediaPhase) {
+        switch phase {
+        case .connecting: self = .connecting
+        case .connected(let degraded): self = .connected(isDegraded: degraded)
+        }
+    }
+}
+
+nonisolated extension MatrixRTCEndReason {
+    init(_ end: FfiCallEnd) {
+        switch end {
+        case .left: self = .left
+        case .declined: self = .declined
+        case .unanswered: self = .unanswered
+        case .ringNotSent: self = .ringNotSent
+        case .othersLeft: self = .othersLeft
+        case .empty: self = .empty
+        case .slotClosed: self = .slotClosed
+        case .connectionClosed(let message): self = .connectionClosed(message: message)
+        }
+    }
+}
+
+private nonisolated extension Date {
+    init(milliseconds: UInt64) {
+        self.init(timeIntervalSince1970: Double(milliseconds) / 1000)
     }
 }
 
@@ -67,7 +124,7 @@ nonisolated extension MatrixRTCParticipant {
                   isLocal: participant.isLocal,
                   isReachable: participant.reachable,
                   streams: participant.streams.map { .init(kind: .init($0.kind), isMuted: $0.muted) },
-                  handRaisedAt: participant.handRaisedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) })
+                  handRaisedAt: participant.handRaisedAtMs.map(Date.init(milliseconds:)))
     }
 }
 
@@ -106,7 +163,7 @@ nonisolated extension MatrixRTCTile {
                   hasVideo: tile.hasVideo,
                   isMicrophoneMuted: tile.microphoneMuted,
                   isSpeaking: tile.speaking,
-                  handRaisedAt: tile.handRaisedAtMs.map { Date(timeIntervalSince1970: Double($0) / 1000) },
+                  handRaisedAt: tile.handRaisedAtMs.map(Date.init(milliseconds:)),
                   handRaisedPosition: tile.handRaisedPosition.map(Int.init),
                   isReachable: tile.reachable)
     }
@@ -159,6 +216,7 @@ nonisolated extension MatrixRTCFrameEncryptionState {
 }
 
 nonisolated extension MatrixRTCCallEvent {
+    /// Nil for what is not surfaced.
     init?(_ event: FfiCallEvent) {
         switch event {
         case .participantJoined(let memberId, let userId, let participantCount):
@@ -181,25 +239,17 @@ nonisolated extension MatrixRTCCallEvent {
             self = .keyDiscarded(memberID: memberId,
                                  reason: "index \(keyIndex.map(String.init) ?? "?") from \(senderUserId ?? "?")/\(senderDeviceId ?? "?"): \(reason)")
         case .handRaised(let memberId, let raisedAtMs):
-            self = .handRaised(memberID: memberId, raisedAt: Date(timeIntervalSince1970: Double(raisedAtMs) / 1000))
+            self = .handRaised(memberID: memberId, raisedAt: Date(milliseconds: raisedAtMs))
         case .handLowered(let memberId):
             self = .handLowered(memberID: memberId)
         case .reaction(let memberId, let emoji, let name, _):
             self = .reaction(memberID: memberId, emoji: emoji, name: name)
         case .unknownParticipant(let identity):
-            // Not surfaced: the transport knows an identity the membership projection doesn't (yet).
+            // The transport knows an identity the membership projection doesn't (yet).
             MatrixRTCLog.debug("Unknown participant on the transport: \(identity)")
             return nil
-        case .mediaConnectionState(let degraded):
-            self = .mediaConnectionDegraded(degraded)
         case .ownMediaConnectionState(let degraded):
             self = .ownMediaConnectionDegraded(degraded)
-        case .ended(let reason):
-            switch reason {
-            case .left: self = .ended(.left)
-            case .slotClosed: self = .ended(.slotClosed)
-            case .connectionClosed(let message): self = .ended(.connectionClosed(message: message))
-            }
         }
     }
 }

@@ -44,6 +44,8 @@ struct ElementCallStage: View {
     var extendsUnderSideSafeAreas = false
     /// Where our floating tile sits; the context's, so it outlives this view (019 R20).
     var ownCorner: ElementCallOwnTileCorner = .bottomRight
+    /// A direct chat: our camera-off floating tile is hidden even when we are alone.
+    var isDirect = false
     var canSwitchCamera = true
     var isFrontCamera = true
     /// A harness asking for an offset; honoured once per request, clamped like a user's scroll.
@@ -165,7 +167,8 @@ struct ElementCallStage: View {
                                                              speakerID: speakerID,
                                                              ownCorner: ownCorner,
                                                              ownVideoAspect: ownVideoAspect,
-                                                             floatingInsets: floatingInsets))
+                                                             floatingInsets: floatingInsets,
+                                                             isDirect: isDirect))
             let floating = stage.placements.first { $0.appearance == .floating }
             let floatingBounds = ElementCallSmallCallLayout.floatingBounds(metrics: metrics, insets: floatingInsets)
             ScrollView(.vertical) {

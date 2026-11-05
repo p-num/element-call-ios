@@ -99,14 +99,45 @@ nonisolated struct CallSoundEffectRendererTests {
         #expect(render(renderer, frames: 48000).contains { $0 != 0 })
     }
     
+    /// Back to back while the other phone rings, and cut off mid-tone when it stops (030 R23).
+    @Test
+    func theRingbackLoopsUntilStopped() {
+        let renderer = CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], ringback: [0.2, 0.4])
+        renderer.play(.ringback)
+        #expect(matches(render(renderer, frames: 5), [0.1, 0.2, 0.1, 0.2, 0.1]))
+        renderer.stop(.ringback)
+        #expect(matches(render(renderer, frames: 2), [0, 0]))
+    }
+    
+    /// Between two renders only the last request counts, whichever order they came in.
+    @Test
+    func theLastOfAPlayAndAStopWins() {
+        let renderer = CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], ringback: [0.2, 0.4])
+        renderer.play(.ringback)
+        renderer.stop(.ringback)
+        #expect(matches(render(renderer, frames: 2), [0, 0]))
+        renderer.stop(.ringback)
+        renderer.play(.ringback)
+        #expect(matches(render(renderer, frames: 2), [0.1, 0.2]))
+    }
+    
+    @Test
+    func anEndSoundPlaysOnceAndSaysHowLongItLasts() {
+        let renderer = CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], declined: [0.2, 0.4], timeout: .init(repeating: 0, count: 48000))
+        renderer.play(.declined)
+        #expect(matches(render(renderer, frames: 3), [0.1, 0.2, 0]))
+        #expect(renderer.duration(of: .timeout) == .seconds(1))
+    }
+    
     /// The files have to be in the bundle and decodable, or the first anyone hears of it is a silent
     /// call on a device.
-    @Test(arguments: ["join_call", "left_call"])
     @MainActor
-    func theBundledSoundsDecode(resource: String) throws {
+    @Test(arguments: [("join_call", 44928), ("left_call", 44928), ("ringtone", 57600), ("call_declined", 54144), ("call_timeout", 54144)])
+    func theBundledSoundsDecode(resource: String, frames: Int) throws {
         let samples = try CallSoundEffectRenderer.decode(resource: resource)
-        // Web's files are 0.936 s at 48 kHz; the decoder's priming trim may shave a frame or two.
-        #expect(abs(samples.count - 44928) < 2048)
+        // Web's files at 48 kHz: 0.936 s, 1.2 s and 1.128 s. The decoder's priming trim may shave
+        // a frame or two.
+        #expect(abs(samples.count - frames) < 2048)
         #expect(samples.contains { $0 != 0 })
         #expect(samples.allSatisfy { abs($0) <= 1 })
     }

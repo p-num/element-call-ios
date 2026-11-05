@@ -74,6 +74,11 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     /// Whether the room is a direct chat. False until the room has been read.
     public var isDirect = false
     public var connection: ElementCallConnection = .idle
+    /// Whether the call was started as a voice call, which the ringing screen's icon says.
+    public var isAudioCall = false
+    /// Whom a direct call is ringing, while it rings; resolved from the room's members, so a name
+    /// may still be loading.
+    public var callee: ElementCallMemberProfile?
     public var connectedAt: Date?
     public var memberCount = 0
     /// Ourselves first, then the model's ranking untouched. See ``ElementCallScreenViewModel``.
@@ -95,6 +100,14 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     public var isHandPending = false
     /// Joined: there is a membership to put a hand on.
     public var isHandRaiseAvailable = false
+    
+    public var isRinging: Bool {
+        if case .calling = connection {
+            true
+        } else {
+            false
+        }
+    }
     
     /// One other person, filling the stage (019 R4). Nobody to queue behind, and no edge of the
     /// tile's own for a ring, so no hand is shown or offered (009 R33).
