@@ -11,6 +11,10 @@ version will actually read it.
 
 ## Unreleased
 
+_Nothing yet._
+
+## 0.1.0-rc.11.letro.1 - 2026-11-05
+
 - Hosts can implement `ElementCallSystemProvidingProtocol.reportDisconnected(roomID:)` to
   reflect reconnection of this device's publishing media while retaining the same system call.
   Its default implementation does nothing; forward it into the host's connection indicator.
@@ -18,7 +22,26 @@ version will actually read it.
 - Hosts switching calls must check `controller.lastDeparture` for the expected room and a
   `.confirmed` result. `.ended` still means local teardown. `MatrixRTCCall.leave()` now returns
   its original departure result to concurrent/repeated callers, including a retained failure.
-_Nothing yet._
+
+
+
+### What's Changed
+
+🐛 Bugfixes
+* Report native membership departure separately from local teardown by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/3
+* Fix call sound resource loading in Release builds by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/4
+* Match native call intent, lifecycle and publishing recovery by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/5
+* Preserve native call ownership and count people correctly by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/6
+* Use the published RTC3 package by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/7
+
+🧱 Build
+* Update native calls from upstream while retaining the Letro SDK by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/2
+* Merge the stable native iOS Call history by @ehsunahmadi in https://github.com/p-num/element-call-ios/pull/8
+
+### New Contributors
+* @ehsunahmadi made their first contribution in https://github.com/p-num/element-call-ios/pull/2
+
+**Full Changelog**: https://github.com/p-num/element-call-ios/compare/0.1.0-rc.8...0.1.0-rc.11.letro.1
 
 ## 0.1.0-rc.11 - 2026-10-15
 
