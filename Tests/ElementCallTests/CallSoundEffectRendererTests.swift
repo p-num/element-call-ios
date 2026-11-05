@@ -63,12 +63,116 @@ nonisolated struct CallSoundEffectRendererTests {
         #expect(matches(render(renderer, frames: 1), [0.1]))
     }
     
+    /// Over the ceiling, the whole buffer comes down to it at once, rather than being clipped.
     @Test
-    func theMixIsClamped() {
-        let renderer = CallSoundEffectRenderer(join: [2], leave: [2], raiseHand: [])
+    func theMixIsLimitedUnderFullScale() {
+        let renderer = CallSoundEffectRenderer(join: [2, 1], leave: [2, 1], raiseHand: [])
         renderer.play(.join)
         renderer.play(.leave)
-        #expect(matches(render(renderer, frames: 1), [1]))
+        let ceiling = CallSoundEffectRenderer.limiterCeiling
+        #expect(matches(render(renderer, frames: 2), [ceiling, ceiling / 2]))
+    }
+    
+    /// After a peak the level comes back gradually, and a quiet mix is left exactly as it was.
+    @Test
+    func theLimiterLetsGoAfterAPeak() {
+        let renderer = CallSoundEffectRenderer(join: [4] + .init(repeating: 0.2, count: 96000), leave: [], raiseHand: [])
+        renderer.play(.join)
+        _ = render(renderer, frames: 1)
+        let soonAfter = render(renderer, frames: 480)
+        #expect(soonAfter.allSatisfy { $0 < 0.1 })
+        // A second later, in the buffers the engine actually asks for, it is back to the sound's level.
+        var later: [Float] = []
+        for _ in 0..<100 {
+            later = render(renderer, frames: 480)
+        }
+        #expect(abs(later[479] - 0.1) < 1e-4)
+    }
+    
+    // MARK: - The sound effects volume (037 R22, R23)
+    
+    @Test
+    func theVolumeSetsEveryEffectsLevelIncludingOneAlreadyPlaying() {
+        let renderer = withReactions([("generic", [0.4, 0.4])])
+        renderer.play(.join)
+        renderer.playReaction("generic")
+        #expect(matches(render(renderer, frames: 1), [0.3]))
+        renderer.setEffectsGain(0.25)
+        #expect(matches(render(renderer, frames: 1), [0.15]))
+    }
+    
+    @Test
+    func theRingbackKeepsItsLevelWhateverTheVolume() {
+        let renderer = CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], ringback: [0.2, 0.4])
+        renderer.setEffectsGain(0)
+        renderer.play(.ringback)
+        #expect(matches(render(renderer, frames: 2), [0.1, 0.2]))
+    }
+    
+    // MARK: - Reactions (037 R10)
+    
+    private func withReactions(_ sounds: [(String, [Float])]) -> CallSoundEffectRenderer {
+        let renderer = CallSoundEffectRenderer(join: [0.2, 0.2], leave: [], raiseHand: [])
+        renderer.installReactionSounds(.init(sounds))
+        return renderer
+    }
+    
+    @Test
+    func aReactionPlaysNothingUntilItsSoundsAreInstalled() {
+        let renderer = CallSoundEffectRenderer(join: [], leave: [], raiseHand: [])
+        renderer.playReaction("clap")
+        #expect(matches(render(renderer, frames: 2), [0, 0]))
+    }
+    
+    @Test
+    func theSameReactionSoundOverlapsItself() {
+        let renderer = withReactions([("generic", [0.2]), ("clap", [0.2, 0.4, 0.6])])
+        renderer.playReaction("clap")
+        #expect(matches(render(renderer, frames: 1), [0.1]))
+        renderer.playReaction("clap")
+        // The first carries on where it was; the second starts from its beginning beside it.
+        #expect(matches(render(renderer, frames: 3), [0.3, 0.5, 0.3]))
+    }
+    
+    @Test
+    func anUnknownNamePlaysTheGenericSound() {
+        let renderer = withReactions([("generic", [0.6]), ("clap", [0.2])])
+        renderer.playReaction("kazoo")
+        #expect(matches(render(renderer, frames: 2), [0.3, 0]))
+    }
+    
+    /// Eight at once, and a ninth plays nothing rather than cutting one short.
+    @Test
+    func aNinthReactionSoundIsDropped() {
+        let renderer = withReactions([("generic", [0.01, 0.01])])
+        for _ in 0..<9 {
+            renderer.playReaction("generic")
+        }
+        let eight = Float(CallSoundEffectRenderer.reactionVoiceCount) * 0.005
+        #expect(matches(render(renderer, frames: 2), [eight, eight]))
+    }
+    
+    @Test
+    func reactionsNeverTakeTheJoinSoundsPlace() {
+        let renderer = withReactions([("generic", [0.01, 0.01])])
+        for _ in 0..<CallSoundEffectRenderer.reactionVoiceCount {
+            renderer.playReaction("generic")
+        }
+        renderer.play(.join)
+        #expect(matches(render(renderer, frames: 2), [0.14, 0.14]))
+    }
+    
+    /// Eight copies of a loud sound would be four times full scale: the limiter, not the clamp, holds
+    /// them, so no sample is flattened at the rail.
+    @Test
+    func eightLoudReactionsDoNotDistort() {
+        let renderer = withReactions([("generic", [0.9, -0.9, 0.5])])
+        for _ in 0..<CallSoundEffectRenderer.reactionVoiceCount {
+            renderer.playReaction("generic")
+        }
+        let output = render(renderer, frames: 3)
+        #expect(output.allSatisfy { abs($0) <= CallSoundEffectRenderer.limiterCeiling + 1e-6 })
+        #expect(output[0] > output[2])
     }
     
     @Test
@@ -140,6 +244,18 @@ nonisolated struct CallSoundEffectRendererTests {
         #expect(abs(samples.count - frames) < 2048)
         #expect(samples.contains { $0 != 0 })
         #expect(samples.allSatisfy { abs($0) <= 1 })
+    }
+    
+    /// Every sound the core can name is in the bundle and decodes, or that reaction would be silent.
+    @Test
+    @MainActor
+    func theReactionSoundsDecode() throws {
+        #expect(CallSoundEffectRenderer.reactionSoundNames.count == 12)
+        for name in CallSoundEffectRenderer.reactionSoundNames {
+            let samples = try CallSoundEffectRenderer.decode(resource: name, subdirectory: "Sounds/reactions")
+            #expect(samples.count > 4800, "\(name)")
+            #expect(samples.contains { $0 != 0 }, "\(name)")
+        }
     }
     
     /// Web's file is 24 kHz and 0.648 s; at the engine's 48 kHz that is about 31,100 frames. Left at

@@ -34,4 +34,52 @@ nonisolated struct VideoFrameSlotTests {
         slot.offer(frame)
         #expect(count.withLock { $0 } == 100_000)
     }
+    
+    /// A LiveKit full restart replaces every remote track, and the reader of the old one is parked
+    /// for good: unless the source opens the new track, the tile stays on its last frame.
+    @Test
+    func aReplacedTrackIsOpenedAgain() async throws {
+        let opens = Mutex(0)
+        let source = RemoteVideoSource(open: {
+            opens.withLock { $0 += 1 }
+            return nil
+        }, onIdle: { })
+        let slot = VideoFrameSlot()
+        
+        source.attach(slot)
+        try await waitFor(opens: 1, in: opens)
+        // A second tile on the same track shares the reader.
+        source.attach(VideoFrameSlot())
+        source.reopen()
+        try await waitFor(opens: 2, in: opens)
+        source.close()
+    }
+    
+    /// With nobody drawing, the new track waits for the next tile rather than being read for no one.
+    @Test
+    func aReplacedTrackNobodyDrawsIsOpenedOnTheNextAttach() async throws {
+        let opens = Mutex(0)
+        let source = RemoteVideoSource(open: {
+            opens.withLock { $0 += 1 }
+            return nil
+        }, onIdle: { })
+        let slot = VideoFrameSlot()
+        
+        source.attach(slot)
+        try await waitFor(opens: 1, in: opens)
+        source.detach(slot)
+        source.reopen()
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(opens.withLock { $0 } == 1)
+        source.attach(slot)
+        try await waitFor(opens: 2, in: opens)
+        source.close()
+    }
+    
+    private func waitFor(opens expected: Int, in opens: borrowing Mutex<Int>) async throws {
+        for _ in 0..<200 where opens.withLock({ $0 }) < expected {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(opens.withLock { $0 } == expected)
+    }
 }

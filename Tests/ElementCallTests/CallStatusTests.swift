@@ -6,6 +6,7 @@
 //
 
 // `@testable` for `MatrixRTCCall`'s internal initialiser and the controller's seams.
+import Combine
 @testable import ElementCallHost
 @testable import ElementCallKit
 import Foundation
@@ -44,7 +45,7 @@ struct CallStatusTests {
         #expect(connected == .connected(since: Date(timeIntervalSince1970: 2), isDegraded: false))
         #expect(!connected.isDegraded)
         
-        #expect(MatrixRTCCallStatus(.ended(reason: .connectionClosed(message: "gone"))) == .ended(.connectionClosed(message: "gone")))
+        #expect(MatrixRTCCallStatus(.ended(reason: .connectionClosed(reason: .neverConnected, message: "gone"))) == .ended(.connectionClosed(reason: .neverConnected, message: "gone")))
     }
     
     /// Our media is up while the callee's phone still rings, and none of that is connected: the
@@ -133,17 +134,59 @@ struct CallStatusTests {
         #expect(ElementCallController.systemReason(for: .slotClosed) == .remoteEnded)
         #expect(ElementCallController.systemReason(for: .unanswered) == .unanswered)
         #expect(ElementCallController.systemReason(for: .ringNotSent) == .failed)
-        #expect(ElementCallController.systemReason(for: .connectionClosed(message: "gone")) == .failed)
+        #expect(ElementCallController.systemReason(for: .connectionClosed(reason: .budget, message: "gone")) == .failed)
     }
     
     /// A failure we showed is ended by our own leave, and is still a failure to the system.
     @Test
     func aFailedCallIsReportedFailed() async throws {
         let fixture = start(status: .connecting)
-        fixture.controller.setPreviewState(callData: starting, room: ElementCallFakeRoom(), connection: .failed("Media failed"), rtcCall: fixture.call)
+        fixture.controller.setPreviewState(callData: starting, room: ElementCallFakeRoom(), connection: .failed(.other("Media failed")), rtcCall: fixture.call)
         
         fixture.controller.hangUp()
         try await waitUntil { fixture.system.requests.last == .end(roomID: roomID, reason: .failed) }
+    }
+    
+    /// A lost connection is a failure the screen explains before it goes (034 R27): the host hears
+    /// `.ended` only once the user closes it, and the core, which has left already, is not asked to
+    /// leave again.
+    @Test
+    func aLostConnectionStaysOnScreenUntilClosed() async throws {
+        let fixture = start(status: .connected(sinceMs: 1000, degraded: false))
+        let recorder = Recorder(fixture.controller)
+        
+        fixture.rtcCall.statusSubscription.push(.ended(reason: .connectionClosed(reason: .budget, message: "budget spent")))
+        try await waitUntil { fixture.controller.connection == .failed(.connectionLost(.budget)) }
+        try await waitUntil { fixture.system.requests.last == .end(roomID: roomID, reason: .failed) }
+        #expect(!recorder.sawEnded)
+        #expect(fixture.rtcCall.leaveCount == 0)
+        
+        fixture.controller.hangUp()
+        #expect(recorder.sawEnded)
+        #expect(fixture.rtcCall.leaveCount == 0)
+        #expect(fixture.controller.connection == .failed(.connectionLost(.budget)))
+    }
+    
+    /// The reason is on the call screen, so a minimized call that fails comes back to show it.
+    @Test
+    func aMinimizedCallThatFailsIsRestored() async throws {
+        let fixture = start(status: .connected(sinceMs: 1000, degraded: false))
+        let recorder = Recorder(fixture.controller)
+        fixture.controller.setMaximized(false)
+        
+        fixture.rtcCall.statusSubscription.push(.ended(reason: .connectionClosed(reason: .refused, message: "403")))
+        try await waitUntil { fixture.controller.isMaximized }
+        #expect(fixture.controller.connection == .failed(.connectionLost(.refused)))
+        #expect(recorder.sawRestoreRequested)
+    }
+    
+    /// Each cause has its own words, so both platforms can say the same thing for it (034 R27).
+    @Test
+    func everyFailureIsWordedOnItsOwn() {
+        let texts = [ElementCallFailure.connectionLost(.budget), .connectionLost(.refused), .connectionLost(.neverConnected), .joinTimedOut, .joinRefused]
+            .map(\.text)
+        #expect(Set(texts).count == texts.count)
+        #expect(ElementCallFailure.other("Media failed").text == "Media failed")
     }
     
     @Test
@@ -162,10 +205,40 @@ struct CallStatusTests {
     private let roomID = "!room:example.org"
     private let callee = "@bob:example.org"
     
+    /// Collected through a reference so the closure has somewhere to write that outlives the call.
+    private final class Recorder {
+        var actions: [ElementCallControllerAction] = []
+        var cancellable: AnyCancellable?
+        
+        init(_ controller: ElementCallController) {
+            cancellable = controller.actions.sink { [self] action in actions.append(action) }
+        }
+        
+        var sawEnded: Bool {
+            actions.contains {
+                if case .ended = $0 {
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+        
+        var sawRestoreRequested: Bool {
+            actions.contains {
+                if case .restoreRequested = $0 {
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+    
     private struct Fixture {
         let controller: ElementCallController
         let system: ElementCallFakeSystem
-        let rtcCall: FakeRtcCall
+        let rtcCall: FakeRTCCall
         let call: MatrixRTCCall
     }
     
@@ -175,7 +248,7 @@ struct CallStatusTests {
     @Test
     func aStaleCoreStatusCannotEndAReplacementInTheSameRoom() async throws {
         let fixture = start(status: .connected(sinceMs: 1, degraded: false))
-        let replacement = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let replacement = MatrixRTCCall(rtcCall: FakeRTCCall())
         fixture.controller.setPreviewState(callData: starting, room: ElementCallFakeRoom(),
                                            connection: .connected, rtcCall: replacement)
         fixture.controller.follow(replacement, roomID: roomID)
@@ -191,7 +264,7 @@ struct CallStatusTests {
     @Test
     func aQueuedCoreEndCannotEndAReplacementInTheSameRoom() async {
         let fixture = start(status: .ended(reason: .othersLeft))
-        let replacement = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let replacement = MatrixRTCCall(rtcCall: FakeRTCCall())
         fixture.controller.setPreviewState(callData: starting, room: ElementCallFakeRoom(),
                                            connection: .connected, rtcCall: replacement)
         for _ in 0..<50 {
@@ -206,12 +279,12 @@ struct CallStatusTests {
     
     private func start(status: FfiCallStatus, clock: any Clock<Duration> = ContinuousClock()) -> Fixture {
         let system = ElementCallFakeSystem()
-        let controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport()),
+        let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: system,
                                                options: ElementCallOptions(),
                                                style: .stock,
                                                logger: nil)
-        let rtcCall = FakeRtcCall(status: status)
+        let rtcCall = FakeRTCCall(status: status)
         let silence = [Float](repeating: 0, count: 48000)
         let audio = CallAudio(soundEffects: CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], declined: silence, timeout: silence))
         let call = MatrixRTCCall(rtcCall: rtcCall, audio: audio, clock: clock)

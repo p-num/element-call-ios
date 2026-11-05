@@ -61,7 +61,7 @@ struct ElementCallTileView: View, Equatable {
     /// known (019 R4).
     var contentFit: ElementCallTileFit = .standard
     /// Whether a double tap, or VoiceOver's action, may take this tile full screen. Not our own
-    /// tile in a small call (019 R14).
+    /// floating tile (019 R14).
     var allowsFullscreen = true
     /// The device has a camera on each side, so the flip button does something (019 R24).
     var canSwitchCamera = true
@@ -184,11 +184,11 @@ struct ElementCallTileView: View, Equatable {
         // it: without this the feature does not exist for anyone using it.
         .accessibilityActions {
             if allowsFullscreen {
-                Button("Full screen") { onToggleFullscreen() }
+                Button(L10n.a11yEnterFullscreen) { onToggleFullscreen() }
             }
             if let floatingCorner {
                 ForEach(Self.cornersToMoveTo(from: floatingCorner), id: \.self) { corner in
-                    Button("Move to \(Self.spokenName(of: corner))") { onMoveToCorner(corner) }
+                    Button(Self.moveLabel(to: corner)) { onMoveToCorner(corner) }
                 }
             }
         }
@@ -199,13 +199,13 @@ struct ElementCallTileView: View, Equatable {
             return Text(Self.ownLabel(name: tile.displayName, hasVideo: tile.hasVideo, corner: floatingCorner))
         }
         guard isNameHidden else { return Text("") }
-        return Text(tile.isScreenShare ? "\(tile.displayName) (Screen share)" : tile.displayName)
+        return Text(tile.isScreenShare ? L10n.sharedScreenName(tile.displayName) : tile.displayName)
     }
     
-    /// "You, camera on, bottom right": the corner only while it floats, since inline it is simply
+    /// "You, Camera on, Bottom right": the corner only while it floats, since inline it is simply
     /// the first tile (019 R26, R27).
     static func ownLabel(name: String, hasVideo: Bool, corner: ElementCallOwnTileCorner?) -> String {
-        ([name, hasVideo ? "camera on" : "camera off"] + (corner.map { [spokenName(of: $0)] } ?? [])).joined(separator: ", ")
+        ([name, hasVideo ? L10n.a11yCameraOn : L10n.a11yCameraOff] + (corner.map { [spokenName(of: $0)] } ?? [])).joined(separator: ", ")
     }
     
     /// The other three corners, in reading order (019 R25).
@@ -215,10 +215,21 @@ struct ElementCallTileView: View, Equatable {
     
     static func spokenName(of corner: ElementCallOwnTileCorner) -> String {
         switch corner {
-        case .topLeft: "top left"
-        case .topRight: "top right"
-        case .bottomLeft: "bottom left"
-        case .bottomRight: "bottom right"
+        case .topLeft: L10n.a11yCornerTopLeft
+        case .topRight: L10n.a11yCornerTopRight
+        case .bottomLeft: L10n.a11yCornerBottomLeft
+        case .bottomRight: L10n.a11yCornerBottomRight
+        }
+    }
+    
+    /// A whole sentence per corner rather than "Move to" and a corner's name, which only English
+    /// can join in that order.
+    static func moveLabel(to corner: ElementCallOwnTileCorner) -> String {
+        switch corner {
+        case .topLeft: L10n.a11yMoveToTopLeft
+        case .topRight: L10n.a11yMoveToTopRight
+        case .bottomLeft: L10n.a11yMoveToBottomLeft
+        case .bottomRight: L10n.a11yMoveToBottomRight
         }
     }
     
@@ -226,7 +237,11 @@ struct ElementCallTileView: View, Equatable {
         ZStack {
             style.theme.bgSubtleSecondary
             
-            if tile.hasVideo, !isVideoSuspended {
+            // `hasVideo` stays true through an interruption, because the core ranks on it, so a
+            // remote tile whose media is not arriving is gated here: its renderer would hold the
+            // last frame of someone no longer coming through. Unmounting it takes the frame with it
+            // (034 R34). Not ours, which is the camera in our hand rather than anything received.
+            if tile.hasVideo, !isVideoSuspended, tile.isLocal || !tile.isMediaInterrupted {
                 // The crop opens as the tile grows rather than at the moment it is told to: see
                 // ``AnimatableFit``. A share is fitted at *every* size, not only when it is large:
                 // the stage can put one in a strip cell now that it is a tile of its own, and
@@ -257,6 +272,13 @@ struct ElementCallTileView: View, Equatable {
                     ElementCallSoundWaves(isSpeaking: tile.isSpeaking, avatarDiameter: Self.largeAvatarDiameter)
                 }
                 avatar
+                if appearance == .fullBleed, tile.isMediaInterrupted {
+                    // Under the avatar rather than in the corner where other nameless tiles carry
+                    // it: this tile's corner is under the control bar and the home indicator
+                    // (019 R4). Provisional until design places it.
+                    badge { mediaIndicator }
+                        .offset(y: Self.largeAvatarDiameter / 2 + 24)
+                }
             }
         }
         // The clip shape clips hit testing with it, so without this the corners do not answer.
@@ -377,12 +399,21 @@ struct ElementCallTileView: View, Equatable {
             }
             Spacer()
             HStack(alignment: .bottom, spacing: 4) {
+                if isNameHidden, tile.isMediaInterrupted, appearance != .fullBleed {
+                    // Our floating tile, and every other tile drawn without a name, carry the
+                    // indicator on its own where the name tag would be (034 R23).
+                    badge { mediaIndicator }
+                }
                 if !isNameHidden {
                     badge {
-                        // A screen has no microphone of its own, and a mic glyph on both of one
-                        // person's tiles reads as two people. The share glyph says what the tile
-                        // is instead.
-                        if tile.isScreenShare {
+                        // In the microphone's place, as the design draws it: while nothing arrives
+                        // from them, whether they are muted says nothing.
+                        if tile.isMediaInterrupted {
+                            mediaIndicator
+                        } else if tile.isScreenShare {
+                            // A screen has no microphone of its own, and a mic glyph on both of one
+                            // person's tiles reads as two people. The share glyph says what the
+                            // tile is instead.
                             style.icons.icon(.shareScreen, size: .xSmall, relativeTo: .bodySM)
                         } else if isHandInNamePill, let position = tile.handPosition {
                             // The number between the hand and the name, as on Android (009 C9).
@@ -396,14 +427,14 @@ struct ElementCallTileView: View, Equatable {
                             style.icons.icon(tile.isMicrophoneMuted ? .micOff : .micOn, size: .xSmall, relativeTo: .bodySM)
                         }
                         // Named as well as labelled: a share can sit in a grid cell right beside
-                        // its owner's camera now, so "(Screen share)" on its own no longer says
+                        // its owner's camera now, so "Screen share" on its own no longer says
                         // whose.
-                        Text(tile.isScreenShare ? "\(tile.displayName) (Screen share)" : tile.displayName)
+                        Text(tile.isScreenShare ? L10n.sharedScreenName(tile.displayName) : tile.displayName)
                             .lineLimit(1)
                     }
                 }
                 if let heroStack {
-                    badge { Text("\(heroStack.shown + 1) of \(heroStack.count)") }
+                    badge { Text(L10n.heroPosition(heroStack.shown + 1, heroStack.count)) }
                         // One element, so the identifier lands on something a test can find and
                         // VoiceOver reads the position as one phrase.
                         .accessibilityElement(children: .combine)
@@ -426,16 +457,22 @@ struct ElementCallTileView: View, Equatable {
         isSpotlight && tile.hasHandRaised && !tile.isScreenShare && !isNameHidden
     }
     
+    private var mediaIndicator: some View {
+        ElementCallMediaIndicator(state: tile.mediaState)
+    }
+    
     private var switchCameraButton: some View {
         Button { onAction(.switchCamera) } label: {
             style.icons.icon(.switchCamera, size: .small, relativeTo: .bodySM)
+                .foregroundStyle(style.theme.iconPrimary)
                 .padding(6)
-                .background(Color.black.opacity(0.5), in: Circle())
+                // Interactive, and it has to be: see `ElementCallGlass`.
+                .elementCallGlass(in: Circle(), fallback: style.theme.bgSubtleSecondary, isInteractive: true)
         }
-        .accessibilityLabel("Switch camera")
+        .accessibilityLabel(L10n.a11ySwitchCamera)
         // Which camera is in use, so a VoiceOver user hears what the button changed, and a UI test
         // can tell a tap that reached it from one that did not (019 R22).
-        .accessibilityValue(isFrontCamera ? "Front camera" : "Back camera")
+        .accessibilityValue(isFrontCamera ? L10n.a11yFrontCamera : L10n.a11yBackCamera)
     }
     
     /// Where the picture sits between filled (0) and fitted (1).
@@ -497,7 +534,60 @@ struct ElementCallTileView: View, Equatable {
             .foregroundStyle(style.theme.textPrimary)
             .padding(.horizontal, 8)
             .padding(.vertical, 4)
-            .background(Color.black.opacity(0.5), in: Capsule())
+            // Opaque, as the design has it: a translucent pill let the picture through, and over a
+            // bright one the name tag's spinner disappeared.
+            .background(style.theme.bgCanvasDefault, in: Capsule())
+    }
+}
+
+/// The name tag's indicator for media that is not reaching the screen (034 R23, R29, R33): read
+/// when focused, never announced. A spinner while it may yet come. Once a member's keys have stayed
+/// away (034 Q8), the key: in the name's colour when theirs has not reached us, in critical red when
+/// the one we hold does not decrypt, and red at once for media sent in clear.
+/// Shared by the tile and the full-screen chrome.
+struct ElementCallMediaIndicator: View {
+    let state: ElementCallTileMediaState
+    
+    @Environment(\.elementCallStyle) private var style
+    
+    var body: some View {
+        switch state {
+        case .keysMissing:
+            keyOff(style.theme.textPrimary).accessibilityLabel(L10n.a11yMediaKeysMissing)
+        case .keyInvalid:
+            keyOff(style.theme.iconCriticalPrimary).accessibilityLabel(L10n.a11yMediaKeyInvalid)
+        case .notEncrypted:
+            keyOff(style.theme.iconCriticalPrimary).accessibilityLabel(L10n.a11yMediaNotEncrypted)
+        case .undecryptable:
+            ElementCallSpinner()
+                .accessibilityLabel(L10n.a11yMediaUndecryptable)
+        case .connecting:
+            ElementCallSpinner()
+                .accessibilityLabel(L10n.a11yMediaConnecting)
+        case .live, .reconnecting:
+            ElementCallSpinner()
+                .accessibilityLabel(L10n.a11yMediaReconnecting)
+        }
+    }
+    
+    private func keyOff(_ tint: Color) -> some View {
+        style.icons.icon(.keyOff, size: .xSmall, relativeTo: .bodySM)
+            .foregroundStyle(tint)
+    }
+}
+
+/// Compound's spinner glyph, turning. Still with reduce motion on, where the glyph alone says it.
+struct ElementCallSpinner: View {
+    @Environment(\.elementCallStyle) private var style
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @State private var isTurning = false
+    
+    var body: some View {
+        style.icons.icon(.spinner, size: .xSmall, relativeTo: .bodySM)
+            .foregroundStyle(style.theme.iconSecondary)
+            .rotationEffect(.degrees(isTurning ? 360 : 0))
+            .animation(reduceMotion ? nil : .linear(duration: 1).repeatForever(autoreverses: false), value: isTurning)
+            .onAppear { isTurning = true }
     }
 }
 
@@ -531,7 +621,7 @@ struct ElementCallRaisedHandBadge: View {
     }
     
     static func spokenLabel(position: Int) -> String {
-        "Hand raised, number \(position) in the queue"
+        L10n.a11yHandRaisedPosition(position)
     }
 }
 
@@ -645,13 +735,16 @@ struct ElementCallTileView_Previews: PreviewProvider, TestablePreview {
     
     static func tileView(_ tile: ElementCallTile,
                          appearance: ElementCallTileAppearance = .card,
-                         isSpotlight: Bool = false) -> some View {
+                         isSpotlight: Bool = false,
+                         isNameHidden: Bool = false,
+                         size: CGSize = CGSize(width: 180, height: 240)) -> some View {
         ElementCallTileView(tile: tile,
                             callProvider: Fixtures.noCall,
                             isSpotlight: isSpotlight,
                             appearance: appearance,
-                            memberCount: 4) { _ in }
-            .frame(width: 180, height: 240)
+                            memberCount: 4,
+                            isNameHidden: isNameHidden) { _ in }
+            .frame(width: size.width, height: size.height)
             .environment(\.colorScheme, .dark)
     }
     
@@ -673,6 +766,19 @@ struct ElementCallTileView_Previews: PreviewProvider, TestablePreview {
         // size for the same reason it is full screen: cropping a document loses what it was showing.
         tileView(Fixtures.share("Frank"))
             .previewDisplayName("Screen share in a cell")
+        tileView(Fixtures.tile("Dan", hasVideo: true, mediaState: .reconnecting))
+            .previewDisplayName("Reconnecting")
+        tileView(Fixtures.tile("Dan", hasVideo: true, mediaState: .undecryptable), isSpotlight: true)
+            .previewDisplayName("Spotlight undecryptable")
+        tileView(Fixtures.tile("Dan", hasVideo: true, mediaState: .keysMissing))
+            .previewDisplayName("Keys missing")
+        tileView(Fixtures.tile("Dan", hasVideo: true, mediaState: .keyInvalid))
+            .previewDisplayName("Key invalid")
+        tileView(Fixtures.tile("You", isLocal: true, hasVideo: true, mediaState: .reconnecting), appearance: .floating, isNameHidden: true)
+            .previewDisplayName("Our own tile reconnecting")
+        tileView(Fixtures.tile("Dan", hasVideo: true, mediaState: .reconnecting), appearance: .fullBleed, isNameHidden: true,
+                 size: CGSize(width: 375, height: 667))
+            .previewDisplayName("Full bleed reconnecting")
         tileView(Fixtures.tile("Grace", stats: "640x360 @ 30 fps\nasked 640x360\ne2ee: ok\npkts 1200 lost 3"))
             .previewDisplayName("With stats")
         // Bare on purpose: its chrome is ``ElementCallFullscreenChrome``, drawn by the screen.

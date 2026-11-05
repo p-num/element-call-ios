@@ -19,7 +19,7 @@ struct CallGenerationTests {
     @Test(arguments: [true, false])
     func cameraPermissionIsBoundToTheCallEvenWhenItsMediaDidNotExistYet(replaceCall: Bool) async throws {
         let room = ElementCallFakeRoom()
-        let controller = makeController(transport: HeldTransport())
+        let controller = makeController(backend: HeldBackend())
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: room, connection: .joining)
         let generation = controller.callGeneration
@@ -51,7 +51,7 @@ struct CallGenerationTests {
     func aCameraOffRequestSupersedesAnEarlierPendingPermission(turnOffWhilePermissionIsPending: Bool) async throws {
         let transport = FakeMediaSession()
         let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
-        let controller = makeController(transport: HeldTransport())
+        let controller = makeController(backend: HeldBackend())
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: ElementCallFakeRoom(), connection: .connected, call: media)
         let generation = controller.callGeneration
@@ -81,9 +81,9 @@ struct CallGenerationTests {
     
     @Test
     func aLateSystemStartDoesNotOpenARoomForTheReplacement() async throws {
-        let transport = HeldTransport()
+        let transport = HeldBackend()
         let system = HeldSystem()
-        let controller = makeController(transport: transport, system: system)
+        let controller = makeController(backend: transport, system: system)
         let room = ElementCallFakeRoom()
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false), room: room, connection: .joining)
         let generation = controller.callGeneration
@@ -100,55 +100,47 @@ struct CallGenerationTests {
         #expect(controller.connection == .connected)
     }
     
-    @Test(arguments: [true, false])
-    func aLateRoomOpenOrErrorCannotReplaceOrFailTheCurrentCall(fails: Bool) async throws {
-        let transport = HeldTransport(holdsOpen: true)
-        let controller = makeController(transport: transport)
+    @Test
+    func aLateRoomSeedCannotReplaceTheCurrentCall() async throws {
+        let backend = HeldBackend(holdsSeed: true)
+        let controller = makeController(backend: backend)
         let room = ElementCallFakeRoom()
-        controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false), room: room, connection: .joining)
+        let data = ElementCallData(isAudioCall: true, isStartingCall: false)
+        controller.setPreviewState(callData: data, room: room, connection: .joining)
         let generation = controller.callGeneration
-        let joining = Task {
-            await controller.joinCall(for: .init(isAudioCall: true, isStartingCall: false), room: room, generation: generation)
-        }
-        let opened = HeldMatrixRoom(roomID: room.roomID)
-        defer { transport.open.answer(opened) }
-        try await waitUntil { transport.open.isPending }
+        let joining = Task { await controller.joinCall(for: data, room: room, generation: generation) }
+        defer { backend.seedRoom() }
+        try await waitUntil { backend.isSeeding }
         let replacement = replaceCall(controller, in: room)
-        if fails {
-            transport.open.fail()
-        } else {
-            transport.open.answer(opened)
-        }
+        backend.seedRoom()
         #expect(await joining.value == nil)
         #expect(controller.rtcCall === replacement)
         #expect(controller.connection == .connected)
         #expect(controller.errorMessage == nil)
-        if !fails {
-            #expect(opened.closeCount == 1)
-        }
+        try await waitUntil { backend.closeCount == 1 }
+        #expect(backend.memberPublications.isEmpty)
     }
     
     @Test
-    func aCancelledTransportOpenClosesItsRoomWithoutStartingTheCore() async throws {
-        let transport = HeldTransport(holdsOpen: true)
-        let client = MatrixRTCClient(transport: transport)
+    func cancellingRoomSeedingClosesTheLateSubscription() async throws {
+        let backend = HeldBackend(holdsSeed: true)
+        let client = MatrixRTCClient(backend: backend)
         let opening = Task { try await client.room(roomID: "!late:example.org", format: .roomState) }
-        let opened = HeldMatrixRoom(roomID: "!late:example.org")
-        defer { transport.open.answer(opened) }
-        try await waitUntil { transport.open.isPending }
+        defer { backend.seedRoom() }
+        try await waitUntil { backend.isSeeding }
         opening.cancel()
-        transport.open.answer(opened)
         await #expect(throws: CancellationError.self) { try await opening.value }
-        #expect(opened.closeCount == 1)
-        #expect(opened.subscriptionCount == 0)
+        backend.seedRoom()
+        try await waitUntil { backend.closeCount == 1 }
+        #expect(backend.memberPublications.isEmpty)
     }
     
     @Test(arguments: [true, false])
     func aLateMembershipJoinOrErrorCannotReplaceOrFailTheCurrentCall(fails: Bool) async throws {
         let room = ElementCallFakeRoom()
-        let matrixRoom = HeldMatrixRoom(roomID: room.roomID, holdsJoin: true)
-        let transport = HeldTransport(room: matrixRoom)
-        let controller = makeController(transport: transport)
+        let matrixRoom = HeldBackend(holdsJoin: true)
+        let transport = matrixRoom
+        let controller = makeController(backend: transport)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false), room: room, connection: .joining)
         let generation = controller.callGeneration
         let joining = Task {
@@ -171,11 +163,11 @@ struct CallGenerationTests {
     
     @Test
     func aFailureKeepsRestartBehindItsOriginalMembershipCleanup() async throws {
-        let transport = HeldTransport()
+        let transport = HeldBackend()
         let system = HeldSystem()
-        let controller = makeController(transport: transport, system: system)
+        let controller = makeController(backend: transport, system: system)
         let room = ElementCallFakeRoom()
-        let oldCore = FakeRtcCall(holdsLeave: true)
+        let oldCore = FakeRTCCall(holdsLeave: true)
         let oldCall = MatrixRTCCall(rtcCall: oldCore)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: room, connection: .connected, rtcCall: oldCall)
@@ -190,7 +182,7 @@ struct CallGenerationTests {
         controller.startCall(.init(isAudioCall: true, isStartingCall: false), room: room)
         #expect(controller.callGeneration == generation)
         #expect(controller.rtcCall === oldCall)
-        #expect(controller.connection == .failed("Media failed"))
+        #expect(controller.connection == .failed(.other("Media failed")))
         try await waitUntil { oldCore.hasPendingLeave }
         #expect(oldCore.leaveCount == 1)
         
@@ -213,9 +205,9 @@ struct CallGenerationTests {
     @Test
     func dismissingAFailureCannotClearTheRoomBeforeItsQueuedTeardown() async throws {
         let system = ElementCallFakeSystem()
-        let controller = makeController(transport: HeldTransport(), system: system)
+        let controller = makeController(backend: HeldBackend(), system: system)
         let room = ElementCallFakeRoom()
-        let core = FakeRtcCall(holdsLeave: true)
+        let core = FakeRTCCall(holdsLeave: true)
         let call = MatrixRTCCall(rtcCall: core)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: room, connection: .connected, rtcCall: call)
@@ -225,7 +217,7 @@ struct CallGenerationTests {
         controller.reset()
         #expect(controller.room === room)
         #expect(controller.rtcCall === call)
-        #expect(controller.connection == .failed("Media failed"))
+        #expect(controller.connection == .failed(.other("Media failed")))
         try await waitUntil { core.hasPendingLeave }
         core.answerLeave()
         try await waitUntil { controller.rtcCall == nil && system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
@@ -237,8 +229,8 @@ struct CallGenerationTests {
     
     @Test
     func theHostCanResetSynchronouslyFromTheEndedAction() async throws {
-        let controller = makeController(transport: HeldTransport())
-        let core = FakeRtcCall()
+        let controller = makeController(backend: HeldBackend())
+        let core = FakeRTCCall()
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: ElementCallFakeRoom(), connection: .connected,
                                    rtcCall: MatrixRTCCall(rtcCall: core))
@@ -264,8 +256,8 @@ struct CallGenerationTests {
         let cases = [(true, pair, "ring"), (false, pair, "notification"), (true, [pair[0]], "notification")]
         for (isDirect, joinedUserIDs, expectedNotificationType) in cases {
             let room = ElementCallFakeRoom(isDirect: isDirect)
-            let matrixRoom = HeldMatrixRoom(roomID: room.roomID, joinedUserIDs: joinedUserIDs)
-            let controller = makeController(transport: HeldTransport(room: matrixRoom))
+            let matrixRoom = HeldBackend(joinedUserIDs: joinedUserIDs)
+            let controller = makeController(backend: matrixRoom)
             let data = ElementCallData(isAudioCall: isAudioCall, isStartingCall: isStartingCall)
             controller.setPreviewState(callData: data, room: room, connection: .joining)
             _ = try #require(await controller.joinCall(for: data, room: room, generation: controller.callGeneration))
@@ -291,9 +283,9 @@ struct CallGenerationTests {
     
     @Test
     func callersOmittingTheNewIntentStillUseTheirNotificationIntent() async throws {
-        let matrixRoom = HeldMatrixRoom(roomID: "!legacy:example.org")
-        let client = MatrixRTCClient(transport: HeldTransport(room: matrixRoom))
-        let room = try await client.room(roomID: matrixRoom.roomID, format: .roomState)
+        let matrixRoom = HeldBackend()
+        let client = MatrixRTCClient(backend: matrixRoom)
+        let room = try await client.room(roomID: "!legacy:example.org", format: .roomState)
         // The existing source call remains valid and the core supplies its notification fallback.
         let call = try await room.joinCall(kind: .direct(ring: .audio))
         let memberships = matrixRoom.memberPublications
@@ -308,35 +300,27 @@ struct CallGenerationTests {
     @Test(arguments: [true, false])
     func roomOpenAndJoinFailuresShowHostCopyAndKeepServiceDiagnostics(failsToOpenRoom: Bool) async throws {
         let room = ElementCallFakeRoom()
-        let matrixRoom = HeldMatrixRoom(roomID: room.roomID, holdsJoin: !failsToOpenRoom)
-        let transport = HeldTransport(holdsOpen: failsToOpenRoom, room: matrixRoom)
+        let matrixRoom = HeldBackend(holdsJoin: !failsToOpenRoom, refusesRoom: failsToOpenRoom)
+        let transport = matrixRoom
         let system = ElementCallFakeSystem()
         let logger = ElementCallFakeLogger()
         let strings = ElementCallStrings(callPreparationFailed: "Host preparation failure. Try again.",
                                          callJoinFailed: "Host join failure. Try again.")
-        let controller = makeController(transport: transport, system: system, strings: strings, logger: logger)
+        let controller = makeController(backend: transport, system: system, strings: strings, logger: logger)
         controller.startCall(.init(isAudioCall: true, isStartingCall: false), room: room)
-        defer {
-            transport.open.fail()
-            matrixRoom.publication.fail()
-        }
-        if failsToOpenRoom {
-            try await waitUntil { transport.open.isPending }
-            transport.open.fail()
-        } else {
+        defer { matrixRoom.publication.fail() }
+        if !failsToOpenRoom {
             try await waitUntil { matrixRoom.publication.isPending }
             matrixRoom.publication.fail()
         }
         try await waitUntil { system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         
-        let expected = failsToOpenRoom ? strings.callPreparationFailed : strings.callJoinFailed
+        let expected: ElementCallFailure = failsToOpenRoom ? .other(strings.callPreparationFailed) : .joinRefused
         #expect(controller.connection == .failed(expected))
-        let stage = failsToOpenRoom ? "Could not open the room:" : "Join failed:"
+        let stage = failsToOpenRoom ? "Could not open the room:" : "Join refused:"
         #expect(logger.messages.contains { $0.contains(stage) && $0.contains("Forbidden") })
-        if failsToOpenRoom {
-            #expect(logger.messages.contains { $0.contains("M_FORBIDDEN") && $0.contains("403") })
-        }
-        #expect(!logger.messages.contains(expected))
+        #expect(!logger.messages.contains(strings.callPreparationFailed))
+        #expect(!logger.messages.contains(strings.callJoinFailed))
     }
     
     @Test
@@ -344,11 +328,11 @@ struct CallGenerationTests {
         let system = ElementCallFakeSystem()
         let logger = ElementCallFakeLogger()
         let strings = ElementCallStrings(microphoneStartFailed: "Host microphone failure. Try again.")
-        let controller = makeController(transport: HeldTransport(), system: system, strings: strings, logger: logger)
+        let controller = makeController(backend: HeldBackend(), system: system, strings: strings, logger: logger)
         let transport = FakeMediaSession(holdingPublish: .microphone)
         let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
         let room = ElementCallFakeRoom()
-        let call = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let call = MatrixRTCCall(rtcCall: FakeRTCCall())
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false), room: room,
                                    connection: .connectingMedia, call: media, rtcCall: call)
         let prepareAudio: () -> Void = { }
@@ -359,7 +343,7 @@ struct CallGenerationTests {
         await startup.value
         try await waitUntil { system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
         
-        #expect(controller.connection == .failed(strings.microphoneStartFailed))
+        #expect(controller.connection == .failed(.other(strings.microphoneStartFailed)))
         #expect(logger.messages.contains { $0.contains("Microphone failed:") && $0.contains("MIC_CAPTURE_FIXTURE") })
         #expect(!logger.messages.contains(strings.microphoneStartFailed))
         await media.disconnect()
@@ -369,18 +353,18 @@ struct CallGenerationTests {
         try #require(JSONSerialization.jsonObject(with: Data(contentJSON.utf8)) as? [String: Any])
     }
     
-    private func makeController(transport: any ElementCallMatrixTransportProtocol,
+    private func makeController(backend: any ElementCallMatrixBackendProtocol,
                                 system: any ElementCallSystemProvidingProtocol = ElementCallFakeSystem(),
                                 strings: ElementCallStrings = .init(),
                                 logger: (any ElementCallLoggingProtocol)? = nil) -> ElementCallController {
         let stock = ElementCallStyle.stock
         let style = ElementCallStyle(theme: stock.theme, icons: stock.icons, avatars: stock.avatars, strings: strings)
-        return ElementCallController(rtcClient: MatrixRTCClient(transport: transport), system: system,
+        return ElementCallController(backend: backend, system: system,
                                      options: .init(), style: style, logger: logger)
     }
     
     private func replaceCall(_ controller: ElementCallController, in room: ElementCallFakeRoom) -> MatrixRTCCall {
-        let replacement = MatrixRTCCall(rtcCall: FakeRtcCall())
+        let replacement = MatrixRTCCall(rtcCall: FakeRTCCall())
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: false),
                                    room: room, connection: .connected, rtcCall: replacement)
         return replacement
@@ -395,7 +379,7 @@ struct CallGenerationTests {
             }
             try await clock.sleep(for: .milliseconds(1))
         }
-        throw FakeRtcCall.RefusedError()
+        throw FakeRTCCall.RefusedError()
     }
 }
 
@@ -432,7 +416,7 @@ private final nonisolated class HeldReply<Value: Sendable>: Sendable {
     }
     
     func fail() {
-        complete(.failure(MatrixRTCTransportError.failed("Forbidden", errcode: "M_FORBIDDEN", httpStatus: 403)))
+        complete(.failure(ElementCallMatrixBackendError(errorCode: "M_FORBIDDEN", statusCode: 403, reason: "Forbidden")))
     }
     
     private func complete(_ result: Result<Value, Error>) {
@@ -446,69 +430,48 @@ private final nonisolated class HeldReply<Value: Sendable>: Sendable {
     }
 }
 
-private final nonisolated class HeldTransport: ElementCallMatrixTransportProtocol {
+private final nonisolated class HeldBackend: ElementCallMatrixBackendProtocol {
     let userID = "@alice:example.org"
     let deviceID = "FAKEDEVICE"
-    let open = HeldReply<any ElementCallMatrixRoomProtocol>()
-    private let delegate = ElementCallFakeTransport()
-    private let holdsOpen: Bool
-    private let room: (any ElementCallMatrixRoomProtocol)?
-    private let opens = Mutex(0)
-    
-    init(holdsOpen: Bool = false, room: (any ElementCallMatrixRoomProtocol)? = nil) {
-        self.holdsOpen = holdsOpen
-        self.room = room
-    }
-    
-    var openCount: Int {
-        opens.withLock { $0 }
-    }
-    
-    func openRoom(roomID: String) async throws -> any ElementCallMatrixRoomProtocol {
-        opens.withLock { $0 += 1 }
-        if holdsOpen {
-            return try await open.wait()
-        }
-        if let room {
-            return room
-        }
-        return try await delegate.openRoom(roomID: roomID)
-    }
-    
-    func sendToDeviceMessage(eventType: String, messages: [String: [String: String]]) async throws -> [String: [String]] {
-        try await delegate.sendToDeviceMessage(eventType: eventType, messages: messages)
-    }
-    
-    func toDeviceMessages(eventTypes: [String]) -> AsyncStream<MatrixRTCToDeviceMessage> {
-        delegate.toDeviceMessages(eventTypes: eventTypes)
-    }
-    
-    func requestOpenIDToken() async throws -> MatrixRTCOpenIDToken {
-        try await delegate.requestOpenIDToken()
-    }
-}
-
-private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
-    let roomID: String
     let publication = HeldReply<String>()
-    private let delegate: ElementCallFakeMatrixRoom
+    private let holdsSeed: Bool
     private let holdsJoin: Bool
+    private let refusesRoom: Bool
     private let joinedUserIDs: [String]
     private let state = Mutex(State())
     
+    private struct Seed {
+        let subjects: ElementCallRoomSubjects
+        let sink: ElementCallRoomSink
+    }
+    
     private struct State {
+        var seed: Seed?
+        var opens = 0
         var closes = 0
-        var subscriptions = 0
         var heldPublication = false
         var memberPublications: [String] = []
         var notifications: [String] = []
     }
     
-    init(roomID: String, holdsJoin: Bool = false, joinedUserIDs: [String] = ["@alice:example.org"]) {
-        self.roomID = roomID
+    init(holdsSeed: Bool = false, holdsJoin: Bool = false, refusesRoom: Bool = false,
+         joinedUserIDs: [String] = ["@alice:example.org"]) {
+        self.holdsSeed = holdsSeed
         self.holdsJoin = holdsJoin
+        self.refusesRoom = refusesRoom
         self.joinedUserIDs = joinedUserIDs
-        delegate = ElementCallFakeMatrixRoom(roomID: roomID, ownUserID: "@alice:example.org")
+    }
+    
+    var isSeeding: Bool {
+        state.withLock { $0.seed != nil }
+    }
+    
+    var openCount: Int {
+        state.withLock { $0.opens }
+    }
+    
+    var closeCount: Int {
+        state.withLock { $0.closes }
     }
     
     var memberPublications: [String] {
@@ -519,97 +482,102 @@ private final nonisolated class HeldMatrixRoom: ElementCallMatrixRoomProtocol {
         state.withLock { $0.notifications }
     }
     
-    var closeCount: Int {
-        state.withLock { $0.closes }
+    func subscribeToRoom(roomID: String, subjects: ElementCallRoomSubjects, sink: ElementCallRoomSink) throws(ElementCallMatrixBackendError) -> ElementCallBackendSubscription {
+        if refusesRoom {
+            throw ElementCallMatrixBackendError(errorCode: "M_FORBIDDEN", statusCode: 403, reason: "Forbidden")
+        }
+        state.withLock {
+            $0.opens += 1
+            $0.seed = Seed(subjects: subjects, sink: sink)
+        }
+        if !holdsSeed {
+            seedRoom()
+        }
+        return ElementCallBackendSubscription { [self] in state.withLock { $0.closes += 1 } }
     }
     
-    var subscriptionCount: Int {
-        state.withLock { $0.subscriptions }
-    }
-    
-    func isEncrypted() -> AsyncStream<Bool> {
-        state.withLock { $0.subscriptions += 1 }
-        return delegate.isEncrypted()
-    }
-    
-    func joinedMemberIDs() -> AsyncStream<[String]> {
-        AsyncStream { continuation in
-            continuation.yield(joinedUserIDs)
-            continuation.finish()
+    func seedRoom() {
+        let seed = state.withLock {
+            defer { $0.seed = nil }
+            return $0.seed
+        }
+        guard let seed else { return }
+        seed.sink.deliverEncryption(isEncrypted: false)
+        seed.sink.deliverJoinedMembers(joinedUserIDs)
+        seed.sink.deliverStickyEvents([])
+        for eventType in seed.subjects.stateEventTypes {
+            seed.sink.deliverStateEvents([], ofType: eventType)
         }
     }
     
-    func stickyEvents() -> AsyncStream<[ElementCallRoomEvent]> {
-        delegate.stickyEvents()
-    }
-    
-    func stateEvents(eventType: String) -> AsyncStream<[ElementCallRoomEvent]> {
-        delegate.stateEvents(eventType: eventType)
-    }
-    
-    func timelineEvents(eventTypes: [String]) -> AsyncStream<[ElementCallRoomEvent]> {
-        delegate.timelineEvents(eventTypes: eventTypes)
-    }
-    
-    func redactions() -> AsyncStream<String> {
-        delegate.redactions()
-    }
-    
-    func relations(eventID: String, relType: String, eventType: String) async throws -> [ElementCallRoomEvent] {
-        try await delegate.relations(eventID: eventID, relType: relType, eventType: eventType)
-    }
-    
-    func rtcTransports() async throws -> String {
-        try await delegate.rtcTransports()
-    }
-    
-    func sendStateEvent(eventType: String, stateKey: String, contentJSON: String) async throws -> String {
-        if eventType == "org.matrix.msc3401.call.member", contentJSON != "{}" {
-            state.withLock { $0.memberPublications.append(contentJSON) }
-        }
-        if holdsJoin, eventType == "org.matrix.msc3401.call.member", contentJSON != "{}" {
+    func sendStateEvent(roomID: String, eventType: String, stateKey: String, contentJSON: String) async throws(ElementCallMatrixBackendError) -> String {
+        if eventType == MatrixRTCEventTypes.legacyStateMember, contentJSON != "{}" {
             let hold = state.withLock {
-                guard !$0.heldPublication else { return false }
+                $0.memberPublications.append(contentJSON)
+                guard holdsJoin, !$0.heldPublication else { return false }
                 $0.heldPublication = true
                 return true
             }
             if hold {
-                return try await publication.wait()
+                do {
+                    return try await publication.wait()
+                } catch {
+                    throw ElementCallMatrixBackendError(errorCode: "M_FORBIDDEN", statusCode: 403, reason: "Forbidden")
+                }
             }
         }
-        return try await delegate.sendStateEvent(eventType: eventType, stateKey: stateKey, contentJSON: contentJSON)
+        return "$event"
     }
     
-    func sendStickyEvent(eventType: String, contentJSON: String, durationMs: UInt64) async throws -> String {
-        recordNotification(eventType: eventType, contentJSON: contentJSON)
-        return try await delegate.sendStickyEvent(eventType: eventType, contentJSON: contentJSON, durationMs: durationMs)
+    func sendStickyEvent(roomID: String, eventType: String, contentJSON: String, duration: Duration) async throws(ElementCallMatrixBackendError) -> String {
+        recordNotification(eventType, contentJSON)
+        return "$event"
     }
     
-    func sendDelayedEvent(eventType: String, stateKey: String?, contentJSON: String, delayMs: UInt64) async throws -> String {
-        try await delegate.sendDelayedEvent(eventType: eventType, stateKey: stateKey, contentJSON: contentJSON, delayMs: delayMs)
+    func sendRoomEvent(roomID: String, eventType: String, contentJSON: String) async throws(ElementCallMatrixBackendError) -> String {
+        recordNotification(eventType, contentJSON)
+        return "$event"
     }
     
-    func updateDelayedEvent(delayID: String, action: MatrixRTCDelayedEventAction) async throws {
-        try await delegate.updateDelayedEvent(delayID: delayID, action: action)
-    }
-    
-    func sendRoomEvent(eventType: String, contentJSON: String) async throws -> String {
-        recordNotification(eventType: eventType, contentJSON: contentJSON)
-        return try await delegate.sendRoomEvent(eventType: eventType, contentJSON: contentJSON)
-    }
-    
-    private func recordNotification(eventType: String, contentJSON: String) {
+    private func recordNotification(_ eventType: String, _ contentJSON: String) {
         if eventType.hasSuffix(".rtc.notification") {
             state.withLock { $0.notifications.append(contentJSON) }
         }
     }
     
-    func redactEvent(eventID: String, reason: String?) async throws {
-        try await delegate.redactEvent(eventID: eventID, reason: reason)
+    func sendDelayedStateEvent(roomID: String, eventType: String, stateKey: String, contentJSON: String, delay: Duration) async throws(ElementCallMatrixBackendError) -> String {
+        "delay"
     }
     
-    func close() async {
-        state.withLock { $0.closes += 1 }
+    func sendDelayedStickyEvent(roomID: String, eventType: String, contentJSON: String, stickyDuration: Duration, delay: Duration) async throws(ElementCallMatrixBackendError) -> String {
+        "delay"
+    }
+    
+    func restartDelayedEvent(roomID: String, delayID: String) async throws(ElementCallMatrixBackendError) { }
+    func cancelDelayedEvent(roomID: String, delayID: String) async throws(ElementCallMatrixBackendError) { }
+    func redactEvent(roomID: String, eventID: String, reason: String?) async throws(ElementCallMatrixBackendError) { }
+    func sendToDeviceMessage(eventType: String, contentJSON: String, to recipients: [ElementCallDevice]) async throws(ElementCallMatrixBackendError) -> [ElementCallDevice: String] {
+        [:]
+    }
+    
+    func subscribeToDeviceMessages(eventTypes: [String], sink: ElementCallToDeviceSink) throws(ElementCallMatrixBackendError) -> ElementCallBackendSubscription {
+        .init()
+    }
+    
+    func relations(roomID: String, eventID: String, relationshipType: String, eventType: String) async throws(ElementCallMatrixBackendError) -> [ElementCallMatrixEvent] {
+        []
+    }
+    
+    func openIDToken() async throws(ElementCallMatrixBackendError) -> ElementCallOpenIDToken {
+        .init(accessToken: "", tokenType: "Bearer", matrixServerName: "example.org", expiresIn: .seconds(3600))
+    }
+    
+    func liveKitToken(for request: ElementCallLiveKitTokenRequest) async throws(ElementCallMatrixBackendError) -> String {
+        "jwt"
+    }
+    
+    func rtcTransportsJSON() async throws(ElementCallMatrixBackendError) -> String {
+        #"[{"type":"livekit","livekit_service_url":"https://sfu.example.org"}]"#
     }
 }
 

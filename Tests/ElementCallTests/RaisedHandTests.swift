@@ -21,7 +21,7 @@ import Testing
 struct RaisedHandTests {
     @Test
     func raisingAndLoweringGoThroughToTheCore() async throws {
-        let rtcCall = FakeRtcCall()
+        let rtcCall = FakeRTCCall()
         let call = MatrixRTCCall(rtcCall: rtcCall)
         
         async let raised: Void = call.raiseHand()
@@ -39,24 +39,24 @@ struct RaisedHandTests {
     
     @Test
     func aRefusalReachesTheCaller() async throws {
-        let rtcCall = FakeRtcCall()
+        let rtcCall = FakeRTCCall()
         let call = MatrixRTCCall(rtcCall: rtcCall)
         
         let raised = Task { try await call.raiseHand() }
         try await waitForPendingRequest(on: rtcCall)
-        rtcCall.answer(failingWith: FakeRtcCall.RefusedError())
+        rtcCall.answer(failingWith: FakeRTCCall.RefusedError())
         
         await #expect(throws: MatrixRTCError.self) { try await raised.value }
     }
 }
 
-/// The controller between a tap and the homeserver's answer: one request at a time, and the
-/// control never shows the tap (009 R5, R22).
+/// The controller between a tap and the core: every tap is sent, a later one takes an earlier one
+/// back, and only a refusal is told (009 R5, R22; 034 C12).
 @Suite("Raised hand control")
 @MainActor
 struct RaisedHandControlTests {
-    private func makeController() -> (ElementCallController, FakeRtcCall) {
-        let rtcCall = FakeRtcCall()
+    private func makeController() -> (ElementCallController, FakeRTCCall) {
+        let rtcCall = FakeRTCCall()
         let controller = ElementCallController.fake(connection: .connected)
         controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
                                    room: ElementCallFakeRoom(),
@@ -66,77 +66,77 @@ struct RaisedHandControlTests {
     }
     
     @Test
-    func aRequestIsPendingUntilTheHomeserverAnswers() async throws {
+    func aRequestThatLandsTellsNobody() async throws {
         let (controller, rtcCall) = makeController()
         
         controller.setHandRaised(true)
-        #expect(controller.isHandPending)
         try await waitForPendingRequest(on: rtcCall)
         rtcCall.answer()
+        try await waitUntilAnswered(rtcCall)
         
-        try await waitUntilSettled(controller)
         #expect(controller.errorMessage == nil)
         #expect(rtcCall.requests == [.raise])
     }
     
-    /// A second tap while the first is in flight would send twice, and the order the two land in
-    /// is the homeserver's to pick.
+    /// A request can be suspended for as long as the homeserver is away. A tap meanwhile is the
+    /// user changing their mind, so it is sent rather than dropped; the core resolves the first
+    /// quietly once the second takes over.
     @Test
-    func aTapWhilePendingIsIgnored() async throws {
+    func aTapWhileARequestWaitsTakesItBack() async throws {
         let (controller, rtcCall) = makeController()
         
         controller.setHandRaised(true)
         try await waitForPendingRequest(on: rtcCall)
         controller.setHandRaised(false)
+        try await waitForPendingRequest(on: rtcCall, count: 2)
         rtcCall.answer()
-        try await waitUntilSettled(controller)
+        rtcCall.answer()
+        try await waitUntilAnswered(rtcCall)
         
-        #expect(rtcCall.requests == [.raise])
+        #expect(rtcCall.requests == [.raise, .lower])
+        #expect(controller.errorMessage == nil)
     }
     
     @Test
-    func aRefusalIsToldAndClearsThePendingState() async throws {
+    func aRefusalIsTold() async throws {
         let (controller, rtcCall) = makeController()
         
         controller.setHandRaised(false)
         try await waitForPendingRequest(on: rtcCall)
-        rtcCall.answer(failingWith: FakeRtcCall.RefusedError())
+        rtcCall.answer(failingWith: FakeRTCCall.RefusedError())
         
-        try await waitUntilSettled(controller)
+        for _ in 0..<1000 where controller.errorMessage == nil {
+            try await Task.sleep(for: .milliseconds(5))
+        }
         #expect(controller.errorMessage == "Your hand could not be lowered.")
         #expect(rtcCall.requests == [.lower])
     }
     
     @Test
-    func nothingIsSentBeforeTheJoin() {
+    func nothingIsSentBeforeTheJoin() async throws {
         let controller = ElementCallController.fake(connection: .joining)
         
         controller.setHandRaised(true)
+        try await Task.sleep(for: .milliseconds(20))
         
-        #expect(!controller.isHandPending)
+        #expect(controller.rtcCall == nil)
     }
     
-    /// The screen, end to end: the control goes to pending, and when the homeserver accepts the
-    /// raise it still shows the hand down, because our tile has not moved. Here it never will,
-    /// since nothing publishes one; on a call the core does, a moment later. Showing the tap
-    /// instead would tell the user their hand is up before anyone can see it (009 R5).
+    /// The control reads our tile and nothing else, so it shows whatever the core says the hand is.
+    /// Here nothing publishes a tile, so it stays down while the request waits; on a call the core
+    /// moves the tile before its first send.
     @Test
     func theControlShowsTheTileNotTheTap() async throws {
         let (controller, rtcCall) = makeController()
         let viewModel = ElementCallScreenViewModel(controller: controller)
         // The first refresh runs from the observation task, after construction.
         _ = try await deferFulfillment(values { viewModel.context.viewState.isHandRaiseAvailable }) { $0 }.fulfill()
-        let pending = deferFulfillment(values { viewModel.context.viewState.isHandPending }) { $0 }
         
         viewModel.context.send(viewAction: .toggleRaisedHand)
-        
-        _ = try await pending.fulfill()
-        #expect(!viewModel.context.viewState.isHandRaised)
-        let settled = deferFulfillment(values { viewModel.context.viewState.isHandPending }) { !$0 }
         try await waitForPendingRequest(on: rtcCall)
-        rtcCall.answer()
-        _ = try await settled.fulfill()
+        
         #expect(!viewModel.context.viewState.isHandRaised)
+        rtcCall.answer()
     }
     
     @Test
@@ -165,15 +165,17 @@ struct RaisedHandControlTests {
                               speaking: false,
                               handRaisedAtMs: 5,
                               handRaisedPosition: 3,
-                              reachable: true)
+                              connection: .connected,
+                              unableToDecrypt: nil)
         #expect(MatrixRTCTile(ffi, localMemberID: "me").handRaisedPosition == 3)
     }
     
-    private func waitUntilSettled(_ controller: ElementCallController) async throws {
-        for _ in 0..<1000 where controller.isHandPending {
+    private func waitUntilAnswered(_ rtcCall: FakeRTCCall) async throws {
+        // The answer resumes the controller's task, which then has one more hop to make.
+        for _ in 0..<1000 where rtcCall.pendingRequestCount > 0 {
             try await Task.sleep(for: .milliseconds(5))
         }
-        try #require(!controller.isHandPending)
+        try await Task.sleep(for: .milliseconds(20))
     }
 }
 
@@ -243,9 +245,9 @@ struct ControlBarLengthTests {
 
 /// Until the fake holds a request. Bounded, so a request that never arrives fails rather than hangs.
 @MainActor
-func waitForPendingRequest(on rtcCall: FakeRtcCall) async throws {
-    for _ in 0..<1000 where !rtcCall.hasPendingRequest {
+func waitForPendingRequest(on rtcCall: FakeRTCCall, count: Int = 1) async throws {
+    for _ in 0..<1000 where rtcCall.pendingRequestCount < count {
         try await Task.sleep(for: .milliseconds(5))
     }
-    try #require(rtcCall.hasPendingRequest)
+    try #require(rtcCall.pendingRequestCount >= count)
 }

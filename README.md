@@ -27,14 +27,16 @@ constraints an agent working here must not break.
 | `ElementCallKit` | Capture, render, packers, audio engine, key handling. | the RTC core |
 | `ElementCallHost` | Call lifecycle, spotlight, Picture in Picture, and the ports. | nothing |
 | `ElementCallUI` | Stage, tiles, controls, minimized bar. | design tokens |
-| `ElementCallMatrix` | A ready-made Matrix transport over the Rust SDK. | the Matrix SDK |
 
-`ElementCallMatrix` is the only module that knows the Matrix SDK exists, and SwiftLint enforces that.
+No module knows the Matrix SDK exists, and SwiftLint enforces that: the host implements
+`ElementCallMatrixBackendProtocol` over its own client, so a host's SDK bump never waits on a release
+of this package.
 
 **`ElementCall` itself is the umbrella**: a module containing nothing but `@_exported import` of the
-four. A host that wants the whole thing takes that one dependency and writes one `import ElementCall`,
-which is why the bare name belongs to it rather than to a layer. The four remain published, so a host
-that only wants the media layer can still depend on `ElementCallKit` alone.
+three and of the core's bindings. A host that wants
+the whole thing takes that one dependency and writes one `import ElementCall`, which is why the bare
+name belongs to it rather than to a layer. The three remain published, so a host that only wants the
+media layer can still depend on `ElementCallKit` alone.
 
 `ElementCallHost` holds the ports a host implements and the lifecycle it drives; it is not the host's
 own module, and a host that imports the umbrella never names it. It was called `ElementCall`, and the
@@ -67,43 +69,45 @@ dependencies:
     product: ElementCall
 ```
 
-Then give it an SDK `Client` and a handful of small conformances, and you get a call.
+Then give it a Matrix backend and a handful of small conformances, and you get a call.
+[`Example/ElementCallExample/Matrix/SDKMatrixBackend.swift`](Example/ElementCallExample/Matrix/SDKMatrixBackend.swift)
+is a backend over the Rust SDK's `Client`, unit-tested, to copy into your app.
 
 ```swift
-let stack = ElementCallStack(transport: ElementCallSDKTransport(client: client, logger: logger)!,
-                             system: MyCallKitAdapter(),
-                             options: MyOptions(),
-                             style: ElementCallStyle(theme: MyTheme(),
-                                                     icons: MyIcons(),
-                                                     avatars: MyAvatars()),
-                             logger: logger)
+let controller = ElementCallController(backend: SDKMatrixBackend(client: client, logger: logger)!,
+                                       system: MyCallKitAdapter(),
+                                       options: MyOptions(),
+                                       style: ElementCallStyle(theme: MyTheme(),
+                                                               icons: MyIcons(),
+                                                               avatars: MyAvatars()),
+                                       logger: logger)
 ```
 
 Then start a call and present the screen:
 
 ```swift
-stack.controller.startCall(ElementCallData(isAudioCall: false, isStartingCall: true),
-                           room: MyRoomContext(roomID: roomID))
+controller.startCall(ElementCallData(isAudioCall: false, isStartingCall: true),
+                     room: MyRoomContext(roomID: roomID))
 
-ElementCallScreen(viewModel: ElementCallScreenViewModel(controller: stack.controller))
+ElementCallScreen(viewModel: ElementCallScreenViewModel(controller: controller))
 ```
 
-There is nothing to start. A call opens its room through the transport, the core subscribes to what
-the room needs, and the room is closed again when the call ends.
+There is nothing to start. When a call opens its room, the core subscribes through the backend to
+what the room needs, and cancels those subscriptions when the call ends.
 
 ### What the host provides
 
 | Port | What you supply | Turnkey? |
 | --- | --- | --- |
-| `ElementCallMatrixTransportProtocol` | rooms (`ElementCallMatrixRoomProtocol`: every send and feed), to-device, OpenID | **yes**, use `ElementCallSDKTransport` |
+| `ElementCallMatrixBackendProtocol` | every room send and feed, to-device, OpenID, RTC transports | copy `SDKMatrixBackend` from `Example/` |
 | `ElementCallSystemProvidingProtocol` | CallKit, plus audio-session and mute events coming back | no |
 | `ElementCallRoomContextProtocol` | room display name, direct flag, member profiles | no |
 | `ElementCallAvatarRenderingProtocol` | avatar views, so they match your app | no |
 | `ElementCallThemeProtocol`, `ElementCallIconRenderingProtocol` | colours, fonts and icons | defaults to the real Compound tokens |
 | `ElementCallLoggingProtocol` | a log sink | defaults provided |
-| `ElementCallOptions`, `ElementCallStrings` | feature flags and localised text | **values, not protocols** — construct one, every member defaulted |
+| `ElementCallOptions` | feature flags | **a value, not a protocol** — construct one, every member defaulted |
 
-The four that are not turnkey are the ones only a host can answer. CallKit is process-wide and usually
+The ports that are not turnkey are the ones only a host can answer. CallKit is process-wide and usually
 shared with something else. Room metadata and avatars come from whatever caching layer the host
 already has, and what to call a room with no name is a product decision.
 
@@ -111,7 +115,14 @@ Two members of `ElementCallOptions` are worth setting before a first call. `isDe
 reveals the per-tile diagnostics overlay, so point it at whatever already reveals developer surface
 in your app rather than at the flag that enables calls. `isScreenSharingEnabled` is **off by
 default**, because sharing needs work on the host side before it behaves; turn it on when you are
-ready. Receiving someone else's share never depends on either.
+ready. Receiving someone else's share never depends on either. `isSFUFallbackEnabled`, also off,
+lets a call whose own media server is down borrow another member's; turn it on only where those
+servers accept users from other homeservers.
+
+One call is worth making if your client can tell: `controller.reportConnectivity(isOnline:)`, with
+`false` when your Matrix client goes offline and `true` once a request has succeeded again — not
+when sync merely starts. It lets a call show "your server is unreachable" at once and retry its
+sends the moment the server is back. Without it the call notices at its next send, which is fine.
 
 Every port has a fake shipped alongside it, so previews and tests need no host at all.
 
@@ -133,12 +144,8 @@ because it is the answer someone will reach for next time: the override travels 
 `ElementCallThemeProtocol` **port**, which is a protocol, and a protocol crosses a binary boundary perfectly
 well. `CompoundDesignTokens` is static values, so a duplicated copy costs binary size, not colours.
 
-The real reason is in `Package.swift`. `ElementCallSDKTransport.init?(client:)` takes a
-`MatrixRustSDK.Client`, so that module appears in the module interface — and the manifest declares
-`MatrixRustSDK` as a deliberately wide `"26.09.01" ..< "100.0.0"` because pinning it exactly "forces
-every consumer onto that version, so resolution fails the moment a host bumps the SDK before this
-package cuts a release". A prebuilt binary is compiled against whichever SDK version CI happened to
-have, of a Rust-generated API that turns over monthly, which re-imposes exactly that coupling.
+The real reason is cost: a binary needs library evolution across every public declaration, and
+nothing slow in a host's build would pay for it today.
 
 [RELEASING.md](RELEASING.md#why-there-are-no-artifacts-on-the-release-page) has the rest, including the
 one thing that would justify revisiting it.

@@ -34,6 +34,13 @@ nonisolated struct AccessibilityIdentifierTests {
         #expect(ElementCallAccessibilityIdentifiers.minimizedBar == "elementCall.minimizedBar")
         #expect(ElementCallAccessibilityIdentifiers.roomName == "elementCall.roomName")
         #expect(ElementCallAccessibilityIdentifiers.callState == "elementCall.callState")
+        #expect(ElementCallAccessibilityIdentifiers.preferences == "elementCall.preferences")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesSheet == "elementCall.preferencesSheet")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesClose == "elementCall.preferences.close")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesReactions == "elementCall.preferences.reactions")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesTileStats == "elementCall.preferences.tileStats")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesSoundEffectsVolume == "elementCall.preferences.soundEffectsVolume")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesVersion == "elementCall.preferences.version")
     }
     
     /// The camera spelling is the one an external rig pins, and it has not moved. A share is a

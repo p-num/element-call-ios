@@ -95,14 +95,28 @@ custom_rules:
     message: "The Compound component library must not be imported: its colours live on a shared instance the host re-brands at runtime. Take colours through ElementCallThemeProtocol and icons through ElementCallIconRenderingProtocol. CompoundDesignTokens is fine."
     severity: error
 
-  # Per-module, not package-wide. ElementCallMatrix exists to speak to the SDK, so
-  # the rule would protect nothing there. It earns its keep in the media, lifecycle
-  # and view modules, where an SDK dependency would be pure coupling.
+  # The package carries no Matrix SDK at all: the host implements ElementCallMatrixBackendProtocol over
+  # its own, so a host's SDK bump never waits on a release of ours. Only the example's reference
+  # backend, and its tests, speak to the SDK.
   no_matrix_sdk_dependency:
     regex: "import MatrixRustSDK"
-    message: "Only ElementCallMatrix may import MatrixRustSDK. Elsewhere, go through ElementCallMatrixTransportProtocol."
+    message: "The package must not import MatrixRustSDK: the host implements ElementCallMatrixBackendProtocol. Only the example's reference backend may."
     severity: error
-    # ElementCallMatrix exists to speak to the SDK. Tests are excluded too: the rule guards what a
-    # host ends up linking, and a test bundle is not shipped, so a test asserting on ClientError
-    # classification legitimately imports it.
-    excluded: "(Sources/ElementCallMatrix|Tests)/.*"
+    excluded: "Example/(ElementCallExample/Matrix|ElementCallExampleTests)/.*"
+
+  # The Swift API Design Guidelines, which every name generated from Rust breaks: the bindings spell
+  # `roomId`, `contentJson` and `delayMs`, and a name copied from them reads as ours. Only names we
+  # declare are checked, so passing a value to a generated label (`roomId: roomID`) is fine. The
+  # excluded files conform to generated protocols, whose requirement names are not ours to choose.
+  swift_api_naming:
+    regex: "\\b(let|var|func|case)\\s+[a-z][A-Za-z0-9]*(Id|Ids|Json|Url|Urls|Uri|Sdk|Ffi|Rtc|Ms|Secs)\\b"
+    match_kinds: [keyword, identifier]
+    message: "Follow the Swift API Design Guidelines: initialisms take uniform case (ID, JSON, URL, SDK, RTC) and a unit belongs in the type (Duration, Date), not the name (Ms, Secs)."
+    severity: error
+    excluded: "(Sources/ElementCallKit/(Backend/MatrixBackendAdapter|Harness/MatrixRTCScripted[A-Za-z]*)|Tests/ElementCallTests/Support/FakeRTCCall)\\.swift"
+
+  swift_api_type_naming:
+    regex: "\\b(struct|class|enum|protocol|actor|typealias)\\s+[A-Z][A-Za-z0-9]*?(Id|Json|Url|Sdk|Ffi|Rtc)(?![a-z])"
+    match_kinds: [keyword, identifier]
+    message: "Follow the Swift API Design Guidelines: initialisms take uniform case (ID, JSON, URL, SDK, RTC)."
+    severity: error

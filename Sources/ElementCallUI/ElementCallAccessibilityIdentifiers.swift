@@ -32,6 +32,15 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     /// buttons answering to one identifier.
     public static let exitFullscreen = "\(prefix).exitFullscreen"
     public static let more = "\(prefix).more"
+    /// The overflow menu's item, and the sheet it opens with its controls (037 R12, R13, R16). Set by
+    /// hand, like the top bar's buttons.
+    public static let preferences = "\(prefix).preferences"
+    public static let preferencesSheet = "\(prefix).preferencesSheet"
+    public static let preferencesClose = "\(prefix).preferences.close"
+    public static let preferencesReactions = "\(prefix).preferences.reactions"
+    public static let preferencesTileStats = "\(prefix).preferences.tileStats"
+    public static let preferencesSoundEffectsVolume = "\(prefix).preferences.soundEffectsVolume"
+    public static let preferencesVersion = "\(prefix).preferences.version"
     /// The hero stack's "1 of 3" pill on the spotlight. Set by hand on the view, like the top bar's
     /// buttons: it does not go through `control(for:)`. The dots under the spotlight have none on
     /// purpose: they are hidden from accessibility, so an identifier there would be a constant that
@@ -48,6 +57,11 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     public static let minimizedBar = "\(prefix).minimizedBar"
     public static let roomName = "\(prefix).roomName"
     public static let callState = "\(prefix).callState"
+    /// The service interruptions indicator, and the list it opens (034 R35, R36).
+    public static let interruptions = "\(prefix).interruptions"
+    public static let interruptionsList = "\(prefix).interruptionsList"
+    /// The failure screen's close button (034 R27).
+    public static let failureClose = "\(prefix).failureClose"
     
     /// A tile, identified by the member on it **and the stream it draws**.
     ///
@@ -80,6 +94,13 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         case .shareScreen: screenShare
         case .collapse: minimize
         case .overflow: more
+        case .preferences: preferences
+        case .info: interruptions
+        case .chevronRight: "\(prefix).chevronRight"
+        case .close: "\(prefix).close"
+        case .error: "\(prefix).error"
+        case .spinner: "\(prefix).spinner"
+        case .keyOff: "\(prefix).keyOff"
         case .switchCamera: "\(prefix).switchCamera"
         case .raisedHand: "\(prefix).raisedHand"
         case .userProfile: "\(prefix).userProfile"

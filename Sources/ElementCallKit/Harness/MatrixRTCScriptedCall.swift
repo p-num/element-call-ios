@@ -76,7 +76,7 @@ private nonisolated extension MatrixRTCEndReason {
         case .othersLeft: .othersLeft
         case .empty: .empty
         case .slotClosed: .slotClosed
-        case .connectionClosed(let message): .connectionClosed(message: message)
+        case .connectionClosed(let reason, let message): .connectionClosed(reason: reason.ffi, message: message)
         }
     }
 }

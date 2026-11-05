@@ -36,6 +36,6 @@ struct ElementCallRingingAvatar: View {
             .ignoresSafeArea()
             .allowsHitTesting(false)
             .accessibilityElement(children: .ignore)
-            .accessibilityLabel(style.strings.callingPerson(name))
+            .accessibilityLabel(L10n.a11yCalling(name))
     }
 }

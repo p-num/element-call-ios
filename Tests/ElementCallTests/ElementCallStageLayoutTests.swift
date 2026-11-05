@@ -333,17 +333,17 @@ struct ElementCallStageLayoutTests {
     // MARK: - The detail window (R52, R53)
     
     @Test
-    func theWindowIsTheRankRangeOverTheComposedGridPlusTheSpotlight() {
+    func theWindowIsTheRankRangeOverTheComposedGridPlusTheSpotlight() throws {
         let tiles = [local] + Self.members(60)
         let top = compute(tiles)
         #expect(top.detailWindow.ranks.lowerBound == 0)
-        #expect(top.detailWindow.ranks.upperBound == top.placements.compactMap(\.orderIndex).max()! + 1)
+        #expect(try top.detailWindow.ranks.upperBound == #require(top.placements.compactMap(\.orderIndex).max()) + 1)
         #expect(top.detailWindow.also.isEmpty)
         
         let scrolled = compute(tiles, offset: 2000)
         #expect(scrolled.detailWindow.ranks.lowerBound > 0)
         #expect(scrolled.detailWindow.ranks.lowerBound == scrolled.placements.compactMap(\.orderIndex).min())
-        #expect(scrolled.detailWindow.ranks.upperBound == scrolled.placements.compactMap(\.orderIndex).max()! + 1)
+        #expect(try scrolled.detailWindow.ranks.upperBound == #require(scrolled.placements.compactMap(\.orderIndex).max()) + 1)
         
         // A listen-mode speaker mid-list punches a hole the explicit set covers.
         let speaker = tiles[6]

@@ -135,7 +135,18 @@ public final class ElementCallScreenContext {
                 // Queued after every remote hand, as the harness numbers hands (009 C7).
                 let position = isRaised ? 1 + context.viewState.tiles.count { !$0.isLocal && $0.hasHandRaised } : nil
                 context.viewState.tiles = ElementCallScreenViewState.showingHands(context.viewState.tiles.map { $0.withHandPosition(position) })
+            case .showPreferences:
+                context.viewState.isPreferencesPresented = true
+            case .dismissPreferences:
+                context.viewState.isPreferencesPresented = false
+            case let .setReactionsPreference(preference):
+                context.viewState.reactionsPreference = preference
+            case let .setSoundEffectsVolume(volume):
+                context.viewState.soundEffectsVolume = volume
+            case .playSoundEffectsVolumeSample:
+                break
             case .minimize, .hangUp, .dismiss:
+                context.viewState.isPreferencesPresented = false
                 onHostAction?(action)
             }
         }
@@ -195,7 +206,6 @@ public final class ElementCallScreenViewModel {
     /// call is not in listen mode, which is what makes a hero appearing or the call shrinking clear
     /// it (R3, R9).
     private var lastSpeakerID: MatrixRTCTileID?
-    
     public init(controller: ElementCallController) {
         self.controller = controller
         let room = controller.room
@@ -257,6 +267,16 @@ public final class ElementCallScreenViewModel {
             controller.setHandRaised(!controller.isHandRaised)
         case .toggleTileStats:
             controller.toggleTileStats()
+        case .showPreferences:
+            context.viewState.isPreferencesPresented = true
+        case .dismissPreferences:
+            context.viewState.isPreferencesPresented = false
+        case let .setReactionsPreference(preference):
+            controller.setReactionsPreference(preference)
+        case let .setSoundEffectsVolume(volume):
+            controller.setSoundEffectsVolume(volume)
+        case .playSoundEffectsVolumeSample:
+            controller.playSoundEffectsVolumeSample()
         case .minimize:
             controller.requestMinimize()
         case .hangUp:
@@ -285,6 +305,37 @@ public final class ElementCallScreenViewModel {
         }
     }
     
+    /// Each bubble's sender name, resolved the first time it is seen and kept, so it never changes
+    /// in flight (037 R7a).
+    private var reactionNames: [UInt64: String] = [:]
+    
+    /// Named as the sender's tile is: "You" for this device's membership, otherwise their display
+    /// name, or their Matrix ID without one. Another device of ours is another tile, named for us
+    /// rather than "You" (037 R7).
+    private func reactionBubbles(_ reactions: [MatrixRTCReaction], in call: MatrixRTCMediaSession) -> [ElementCallReactionBubble] {
+        let showing = Set(reactions.map(\.id))
+        reactionNames = reactionNames.filter { showing.contains($0.key) }
+        return reactions.map { reaction in
+            let name = reactionNames[reaction.id] ?? {
+                let name = if reaction.memberID == call.localMemberID {
+                    L10n.you
+                } else {
+                    reactionSenderName(memberID: reaction.memberID, in: call)
+                }
+                reactionNames[reaction.id] = name
+                return name
+            }()
+            return ElementCallReactionBubble(id: reaction.id, emoji: reaction.emoji, senderName: name, spread: reaction.spread)
+        }
+    }
+    
+    private func reactionSenderName(memberID: String, in call: MatrixRTCMediaSession) -> String {
+        let userID = call.tiles.order.first { $0.id.memberID == memberID }?.userID
+            ?? controller.rtcCall?.members.first { $0.memberID == memberID }?.userID
+        guard let userID else { return memberID }
+        return profiles[userID]?.displayName ?? userID
+    }
+    
     private func refresh() {
         var state = context.viewState
         state.connection = controller.connection
@@ -299,6 +350,18 @@ public final class ElementCallScreenViewModel {
         state.audioOutput = controller.audioOutput
         state.isTileStatsVisible = controller.isTileStatsVisible
         state.isMaximized = controller.isMaximized
+        state.reactionsPreference = controller.reactionsPreference
+        state.soundEffectsVolume = controller.soundEffectsVolume
+        // Nowhere to draw it once the call is out of the way, and nothing to come back to after the
+        // call (037 R12a).
+        switch controller.connection {
+        case .ended, .failed:
+            state.isPreferencesPresented = false
+        default:
+            if !state.isMaximized {
+                state.isPreferencesPresented = false
+            }
+        }
         state.memberCount = controller.rtcCall?.memberCount ?? 0
         // Above the guard below: these two are the only controls that mean anything before there is
         // a call, and without them a mute tapped while joining draws itself back unmuted.
@@ -306,16 +369,20 @@ public final class ElementCallScreenViewModel {
         state.isCameraEnabled = controller.isCameraEnabled
         // The membership comes before media, so the hand is offered from the join on.
         state.isHandRaiseAvailable = controller.rtcCall != nil
-        state.isHandPending = controller.isHandPending
         state.isHandRaised = controller.isHandRaised
+        state.isSignallingReachable = controller.signalling.isReachable
+        state.isOwnMediaReconnecting = (controller.call?.interruptions.ownMedia ?? .connected) != .connected
+        // Above the guard as well: the server entry is the one that exists before media does.
+        state.interruptions = controller.interruptions
         
         if let message = controller.errorMessage {
-            context.alertInfo = ElementCallAlert(title: context.style.strings.error, message: message)
+            context.alertInfo = ElementCallAlert(title: L10n.error, message: message)
             controller.errorMessage = nil
         }
         
         guard let call = controller.call else {
             state.tiles = []
+            state.reactions = []
             state.spotlightID = nil
             // So the next call on a reused view model starts its speaker afresh.
             state.smallCallSpeakerID = nil
@@ -340,14 +407,14 @@ public final class ElementCallScreenViewModel {
         call.setRankingThreshold(ElementCallSmallCallLayout.rankingThreshold)
         state.isFrontCamera = call.isFrontCamera
         state.isScreenSharing = call.isScreenSharing
-        state.isMediaDegraded = controller.rtcCall?.status.isDegraded ?? false
         
         state.tiles = Self.tiles(roster: call.tiles,
                                  own: call.ownTile,
                                  profiles: profiles,
-                                 youLabel: context.style.strings.you,
+                                 youLabel: L10n.you,
                                  isLocalMicrophoneMuted: call.isMicrophoneMuted,
                                  localHasVideo: call.isCameraEnabled,
+                                 missingKeys: call.membersMissingKeys,
                                  // The flag is read before any stats, so that with the overlay down
                                  // none of them enters this method's observation access list.
                                  // `receiveStats` is rewritten every second whether anyone is looking
@@ -356,6 +423,7 @@ public final class ElementCallScreenViewModel {
         // Here rather than in the tile, which cannot tell a one-to-one call's floating tile from a
         // small call's, and which would miss the full-screen badge drawn by the screen (009 R33).
         state.tiles = ElementCallScreenViewState.showingHands(state.tiles)
+        state.reactions = reactionBubbles(call.reactions, in: call)
         
         let spotlight = ElementCallSpotlight.choose(tiles: state.tiles,
                                                     shownHeroID: context.shownHeroID,
@@ -380,6 +448,22 @@ public final class ElementCallScreenViewModel {
         controller.setSpotlightTile(pictureInPicture.id, isExact: pictureInPicture.isExact)
         
         publish(state)
+    }
+    
+    /// What a tile's media is doing, by its two causes. A lost connection wins: it is why nothing
+    /// decrypts either.
+    static func mediaState(connection: MatrixRTCConnectionState,
+                           unableToDecrypt: MatrixRTCUnableToDecrypt?,
+                           isMissingKeys: Bool = false) -> ElementCallTileMediaState {
+        switch (connection, unableToDecrypt) {
+        case (.connecting, _): .connecting
+        case (.reconnecting, _), (.unreachable, _): .reconnecting
+        case (.connected, nil): .live
+        // Nothing to wait for: the core will never play it.
+        case (.connected, .notEncrypted): .notEncrypted
+        case (.connected, .missingKey): isMissingKeys ? .keysMissing : .undecryptable
+        case (.connected, .badKey): isMissingKeys ? .keyInvalid : .undecryptable
+        }
     }
     
     /// Publishes a projection only when it differs from the one on screen.
@@ -420,6 +504,7 @@ public final class ElementCallScreenViewModel {
                       youLabel: String,
                       isLocalMicrophoneMuted: Bool,
                       localHasVideo: Bool,
+                      missingKeys: Set<String> = [],
                       stats: (MatrixRTCTile) -> String? = { _ in nil }) -> [ElementCallTile] {
         func tile(_ ref: MatrixRTCTileRef) -> ElementCallTile {
             if let detail = roster.detail[ref.id] {
@@ -452,7 +537,10 @@ public final class ElementCallScreenViewModel {
                                    // Ours is never a hero even if something upstream said so: it is
                                    // not in the ranking, so nothing can rank it.
                                    isHero: tile.isLocal ? false : tile.isHero,
-                                   stats: stats(tile))
+                                   stats: stats(tile),
+                                   mediaState: mediaState(connection: tile.connection,
+                                                          unableToDecrypt: tile.unableToDecrypt,
+                                                          isMissingKeys: missingKeys.contains(tile.memberID)))
                 // Our own mute and camera come from the call, not the tile: see `withLocalMedia`.
                 .withLocalMedia(isMicrophoneMuted: isLocalMicrophoneMuted, hasVideo: localHasVideo)
         }

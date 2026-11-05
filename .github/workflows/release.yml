@@ -24,7 +24,7 @@ jobs:
     # Ubuntu, deliberately. This package has no binary target -- the media xcframework belongs to the
     # matrix-rust-rtc dependency, which does its own url+checksum release -- so a release here builds
     # nothing and needs no Xcode, no simulator, and no fourth copy of the pinned-device triple that
-    # tests.yml and record-snapshots.yml already duplicate between them. Instead the script asks
+    # tests.yml, record-snapshots.yml and ui-tests.yml already duplicate. Instead the script asks
     # whether Tests already passed for this exact commit. See RELEASING.md.
     runs-on: ubuntu-latest
     timeout-minutes: 10

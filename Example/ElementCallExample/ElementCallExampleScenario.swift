@@ -52,6 +52,10 @@ final class ElementCallExampleScenarioPlayback {
     let player: MatrixRTCScenarioPlayer
     private(set) var current: MatrixRTCScenario.Frame?
     private(set) var isPlaying = false
+    /// Set by a fixture whose timeline runs outside the scenario, a ringing or an outage one, whose
+    /// scenario is only its opening roster. The scrubber shows this instead of the frames, which
+    /// would read as a finished scenario from the first second.
+    var timeline: (position: Int, count: Int, text: String)?
     private var playTask: Task<Void, Never>?
     /// The screen the actions go to; attached by the host once the view model exists.
     private weak var context: ElementCallScreenContext?
@@ -59,9 +63,11 @@ final class ElementCallExampleScenarioPlayback {
     
     /// `localMemberID` is the player's own unless given: the ringing fixtures are Alice, whom the
     /// test pattern draws as a camera, upright in the phone's orientation.
-    init(scenario: MatrixRTCScenario, localMemberID: String? = nil) {
+    /// `audioOf` lends the call a scripted call's audio, for a fixture that is heard (``MatrixRTCScenarioPlayer``).
+    init(scenario: MatrixRTCScenario, localMemberID: String? = nil, audioOf rtcCall: MatrixRTCCall? = nil) {
         self.scenario = scenario
-        player = localMemberID.map { MatrixRTCScenarioPlayer(scenario: scenario, localMemberID: $0) } ?? MatrixRTCScenarioPlayer(scenario: scenario)
+        player = localMemberID.map { MatrixRTCScenarioPlayer(scenario: scenario, localMemberID: $0, audioOf: rtcCall) }
+            ?? MatrixRTCScenarioPlayer(scenario: scenario, audioOf: rtcCall)
     }
     
     func attach(context: ElementCallScreenContext, controller: ElementCallController) {
@@ -162,31 +168,17 @@ struct ElementCallExampleScenarioScrubber: View {
     
     var body: some View {
         HStack(spacing: 12) {
-            Button {
-                if playback.isPlaying {
-                    playback.pause()
-                } else {
-                    playback.play()
-                }
-            } label: {
-                Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+            if let timeline = playback.timeline {
+                Text("\(timeline.position)/\(timeline.count)")
+                    .monospacedDigit()
+                Text(timeline.text)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .accessibilityIdentifier("example.scenario.frame")
+            } else {
+                frameControls
             }
-            .accessibilityIdentifier("example.scenario.playPause")
-            Button {
-                Task { await playback.step() }
-            } label: {
-                Image(systemName: "forward.frame.fill")
-            }
-            .disabled(playback.isFinished || playback.isPlaying)
-            .accessibilityIdentifier("example.scenario.step")
-            Text("\(playback.position)/\(playback.count)")
-                .monospacedDigit()
-            Text(playback.cue ?? playback.current?.text ?? playback.scenario.name)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .foregroundStyle(playback.cue == nil ? .white : .yellow)
-                .frame(maxWidth: .infinity, alignment: .leading)
-                .accessibilityIdentifier("example.scenario.frame")
         }
         .font(.caption)
         .foregroundStyle(.white)
@@ -194,5 +186,34 @@ struct ElementCallExampleScenarioScrubber: View {
         .padding(.vertical, 6)
         .background(.black.opacity(0.7), in: Capsule())
         .padding(.horizontal, 16)
+    }
+    
+    @ViewBuilder
+    private var frameControls: some View {
+        Button {
+            if playback.isPlaying {
+                playback.pause()
+            } else {
+                playback.play()
+            }
+        } label: {
+            Image(systemName: playback.isPlaying ? "pause.fill" : "play.fill")
+        }
+        .accessibilityIdentifier("example.scenario.playPause")
+        Button {
+            Task { await playback.step() }
+        } label: {
+            Image(systemName: "forward.frame.fill")
+        }
+        .disabled(playback.isFinished || playback.isPlaying)
+        .accessibilityIdentifier("example.scenario.step")
+        Text("\(playback.position)/\(playback.count)")
+            .monospacedDigit()
+        Text(playback.cue ?? playback.current?.text ?? playback.scenario.name)
+            .lineLimit(1)
+            .truncationMode(.tail)
+            .foregroundStyle(playback.cue == nil ? .white : .yellow)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityIdentifier("example.scenario.frame")
     }
 }

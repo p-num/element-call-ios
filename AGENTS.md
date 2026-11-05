@@ -20,26 +20,30 @@ knows, and what tends to go wrong.
 | `ElementCallKit` | the RTC core only | media, session, capture, render, keys |
 | `ElementCallHost` | nothing beyond the above | call lifecycle, Picture in Picture, **the ports** |
 | `ElementCallUI` | `CompoundDesignTokens` | stage, tiles, controls, minimized bar |
-| `ElementCallMatrix` | `MatrixRustSDK` | turnkey transport, widget-driver stopgap |
 
-1. **`MatrixRustSDK` only in `ElementCallMatrix`.** Everywhere else, go through
-   `ElementCallMatrixTransportProtocol`.
+1. **No `MatrixRustSDK`, in any module.** The host implements `ElementCallMatrixBackendProtocol` over
+   its client and hands it to `ElementCallController`. A library that depends on the SDK holds back every
+   SDK bump of its host, so the only SDK code here is the reference backend in
+   `Example/ElementCallExample/Matrix`, which a host copies.
 2. **Never `import Compound`, in any module.** Its colours live on one shared instance the host
    re-brands at runtime; a copy linked here would never see the override and a re-branded host would
    get a stock-coloured call screen. `CompoundDesignTokens` is fine, being static values.
-3. **No host logger, settings or strings.** Use `ElementCallLoggingProtocol`, `ElementCallOptions`,
-   `ElementCallStrings`.
+3. **No host logger or settings.** Use `ElementCallLoggingProtocol` and `ElementCallOptions`. Text
+   is ours and translated: `L10n`, never a literal (see [Strings](#strings)).
 4. **Theme members are computed properties**, read at draw time. Never capture a colour.
 
 SwiftLint enforces 1 and 2 at error severity. **If you need something from the host, add a port. Never
 add a dependency.**
 
-A fifth target, **`ElementCall`**, exists only to `@_exported import` the four above so a host takes
-one dependency and writes one import. It contains no code and must never contain any: it is a product
-convenience, not a fifth layer, and putting anything in it would put that thing outside every boundary
-in the table. Note the lint rules read comments too — they have no `match_kinds` — so naming the Matrix
-SDK in a comment anywhere outside `ElementCallMatrix` fails the build, and `Sources/ElementCall/` is
-not on the excluded path.
+A fourth target, **`ElementCall`**, exists only to `@_exported import` the three above, and the
+core's bindings, so a host takes one dependency and writes one import. A host needs none of the
+bindings to integrate: see [The call's Matrix backend](#the-calls-matrix-backend). **We own the core's version**: the host never declares `matrix-rust-rtc` itself, so a core
+bump here needs no edit in the host's manifest. Do not narrow the core re-export to a few types
+either; Android exposes the whole core to hosts too (`api(...)`). It contains no code and must never
+contain any: it is a product convenience, not a fourth layer, and putting anything in it would put
+that thing outside every boundary in the table. Note the lint rules read comments too — they have no
+`match_kinds` — so writing the SDK's import line in a comment anywhere outside the reference backend
+fails the build.
 
 **The bare name belongs to the umbrella, not to a layer.** It used to be the other way round — the
 lifecycle-and-ports module was `ElementCall` and the umbrella was `ElementCallAll` — and hosts kept
@@ -94,15 +98,18 @@ names a file, run `swiftformat .` and commit the result with the change, not as 
 
 The pinned device and OS live in `Tests/ElementCallTests/Support/SnapshotEnvironment.swift`. The
 harness reads them and fails loudly when the simulator does not match. **The workflows do not read
-them**, despite the comment in `tests.yml` saying so: `XCODE_APP`, `SIMULATOR_NAME` and
-`SIMULATOR_RUNTIME` are duplicated literals in both workflow files, so changing the pinned device is
-three edits, not one. `release.yml` is deliberately not a fourth: it runs on Linux and gates on the
-`Tests` run for the commit rather than testing anything itself, and the example harness below is not
-a fourth either: its `ui-tests` job, sharded by test class so the wall clock is the longest shard
-rather than all 18 minutes, reads the same workflow-level `env` as the package job. One shard,
-`chrome-ios18`, swaps the runtime for iOS 18, the oldest supported: SwiftUI hands a tap on a tile to
-the stage behind it there as well, which no iOS 26 run can see. **A new UI test class must be added to a shard** in that job's matrix and to its `SHARDED` list; the job fails if one
-is in none.
+them**: `XCODE_APP`, `SIMULATOR_NAME` and `SIMULATOR_RUNTIME` are duplicated literals in
+`tests.yml`, `record-snapshots.yml` and `ui-tests.yml`, so changing the pinned device is four edits,
+not one. `release.yml` is deliberately not a fifth: it runs on Linux and gates on the `Tests` run for
+the commit rather than testing anything itself.
+
+**The UI tests below do not run on pull requests.** `ui-tests.yml` runs them nightly when `main` has
+moved, on pushes to `release/**`, and on demand, in one job: the whole bundle, then
+`ChromeVisibilityUITests` again on iOS 18, the oldest supported, where SwiftUI hands a tap on a tile
+to the stage behind it as well, which no iOS 26 run can see. Sharded across runners on every push,
+they held five Macs of a pool the company shares, and most of each shard was the same fixed cost
+paid again. So a change to a gesture is checked by dispatching that workflow on its branch, and a
+failed nightly notifies only whoever last edited its `cron` line.
 
 ### The example harness and the UI tests
 
@@ -111,6 +118,8 @@ reason: **a gesture is the one thing the package's own tests cannot reach.** Eve
 in-process, but a double tap that is declared correctly and never arrives, because something above
 the tile claimed the touch first, looks identical to a working one from inside. Only a real touch
 tells them apart, and only XCUITest can send one, which needs an application and so a project.
+It also carries the reference Matrix backend over the Rust SDK (see the call's Matrix backend,
+below), the one place this repository depends on the SDK.
 
 ```bash
 brew install xcodegen                       # once per machine
@@ -231,8 +240,8 @@ suite fails on identical bytes until the runner has recorded them once. `git dif
 after that recording run tells the two apart: empty means provenance, anything else is a finding.
 
 The call's timers — the share intent timeout, the release linger, the audio level flush, the stats
-poll, and the video source's idle linger in `VideoFrameSlot.swift` — all sleep on the injected
-clock. A new `Task.sleep` in the Kit is a timer the scenarios cannot step past.
+poll, the wait before a tile says a key is missing, and the video source's idle linger in
+`VideoFrameSlot.swift` — all sleep on the injected clock. A new `Task.sleep` in the Kit is a timer the scenarios cannot step past.
 
 #### Running it by hand, and watching a move frame by frame
 
@@ -364,35 +373,55 @@ Swift packages are released. Do not add a `binaryTarget` or a build-and-attach s
 workflow. [RELEASING.md](RELEASING.md) has the reasoning and the trigger that would justify revisiting
 it.
 
-## The core's Matrix backend
+## Strings
 
-The core reaches Matrix through one object, `MatrixRTCBackend`, which routes its flat, room-ID calls
-to the `ElementCallMatrixRoomProtocol` that `MatrixRTCClient` opened. Two things about it are easy to
+Translated in the element-call Localazy project, in `mobile.json`, which Android downloads too
+(feature-hq spec 036; the workflow is in CONTRIBUTING.md). A key must exist there before code uses
+it: `L10n` is generated from the download, never written.
+
+- **The host's language, not the device's.** `ElementCallLocalization` matches our `.lproj`s against
+  `Bundle.main.preferredLocalizations`. `String(localized:bundle: .module)` and `Text("literal")`
+  resolve against the device instead, so an English app on a French phone gets a French call.
+- **A host overrides no string.** There was an `ElementCallStrings` for it, which no host used and
+  which only ever covered half the screen; Android's hosts get overriding for free from resource
+  merging, ours would need a member per string.
+- **Whole sentences, never assembled.** "Move to" plus a corner's name is English word order;
+  `moveLabel(to:)` has a key per corner.
+- Only languages with a translation are downloaded: Localazy converts nothing for the rest.
+
+## The call's Matrix backend
+
+The host implements **`ElementCallMatrixBackendProtocol`**, and `MatrixBackendAdapter` turns it into
+the core's own `MatrixBackend` for `RtcClient`. **Do not hand the core's protocol to hosts again.** It
+is generated from Rust, so it spells `roomId`, `contentJson` and `delayMs`, takes `Ffi…` values, and a
+host conforming to it has to repeat all of that in its own code. 0.1.0-rc.12 did exactly that, and
+element-x-ios's review rejected it. The adapter is the one place those spellings meet ours; a
+requirement the core gains is added to the port in Swift's terms (`Duration` for a `…Ms`, `Date` for a
+timestamp, a typed error) and converted there.
+
+`SDKMatrixBackend` in the example is the reference, and three things about any backend are easy to
 break:
 
-- **Every set-shaped feed of a room delivers its current set first, an empty one included.** The
+- **Every set-shaped subject of a room delivers its current set first, an empty one included.** The
   core treats a room as ready only once each subject has delivered once, and has no deadline of its
   own; holding back an empty set makes the join hang until `MatrixRTCClient.seedingTimeout`. The
   joined members are the exception that proves it: they always include us, so an empty read is the
   store not having loaded and is rightly held back.
-- **Failures are passed on, never classified.** `MatrixRTCTransportError.failed` carries the
-  homeserver's `errcode` and status; the core decides which refusals retire the delayed leave.
+- **Failures are passed on, never classified.** `ElementCallMatrixBackendError` carries the
+  homeserver's `errcode` and its retry-after; the core decides what is retried and which refusals
+  retire a feature for the session. The one judgement a backend makes is `isPermanent`, and only for a final
+  failure no Matrix code describes, such as a room the client is not in: set on a failure that was
+  transient, it loses that send for good. A read the backend cannot serve answers empty
+  (`relations` is `[]`) rather than failing.
+- **No delayed events yet.** The SDK's bindings lack them (matrix-rust-sdk#6973), so the reference
+  backend refuses with `M_UNRECOGNIZED`, which the core reads as a homeserver without MSC4140: it
+  joins without a dead man's switch and shortens the membership's lifetime. The call keeps to the
+  room-state format because `m.rtc.slot` is not in sliding sync's `required_state`.
 
-The room is closed only after `MatrixRTCRoom.shutdown()`, because the core leaves through it.
-
-## What is temporary
-
-`Sources/ElementCallMatrix/Widget/` drives the SDK's widget driver in process as a stand-in for
-bindings the released SDK lacks: delayed events, room-state and timeline feeds, to-device messaging. It
-is **scheduled for deletion**, and `WidgetMatrixBridge.swift`'s header lists the exact bindings that
-retire it and the removal steps. Do not build new features on it, and do not let it leak past
-`ElementCallSDKTransport` and `ElementCallSDKRoom`.
-
-`ElementCallRoomBridgeStore.open`, reached only through `openRoom`, owns bridge creation and leases.
-Overlapping opens share its pending start; closing an old room releases only that room's lease.
-An earlier version had two creation paths and only one wired up the to-device pump, so
-media keys reached nobody and every remote tile went black. The bridge and its pump are one value now
-so the type system forbids that. Keep it that way.
+The reference backend is compiled into the example app and never run there, since the harness has no
+client; its mappings are tested in `Example/ElementCallExampleTests`, a hostless bundle that compiles
+the backend's sources itself. Hosted in the app it could not link: the SDK values the tests build are
+stripped from an app that never makes them.
 
 ---
 
@@ -411,7 +440,17 @@ so the type system forbids that. Keep it that way.
   and `ElementCallView` both decide on `width > height` and must keep agreeing. An iPad in landscape
   has a *regular* vertical size class, so a size-class branch would lay its tiles out in portrait
   rows while its width says landscape.
-- Follow the [Swift API Design Guidelines]: `ID` not `Id`, `URL` not `Url`.
+- **Follow the [Swift API Design Guidelines] everywhere**, the same rule element-x-ios reviews this
+  package's API against. Initialisms take uniform case (`roomID`, `contentJSON`, `openIDToken`,
+  `SDKMatrixBackend`, `MatrixRTC…`), names are not abbreviated (`relationshipType`, not `relType`;
+  `configuration`, not `config`), and a unit is a type rather than a suffix (`delay: Duration`, not
+  `delayMs: UInt64`; `timestamp: Date`). **Names generated from Rust break all three**, which is the
+  trap: copying one — a pattern binding off a generated enum, a fake's property, a log record field —
+  makes it ours. Generated names stop at the files that convert them (`Mappers.swift`,
+  `MatrixBackendAdapter.swift`) and at conformances to generated protocols, whose requirement names
+  are not ours to choose. SwiftLint's `swift_api_naming` and `swift_api_type_naming` reject a declared
+  name that breaks this, at error severity; they exempt only those conformances. They do not see
+  argument labels, so check a new `func`'s labels by eye.
 - **Every port protocol ends in `Protocol`**, and this is a deliberate exception to those
   guidelines, which would have `ElementCallSystemProvidingProtocol` be `ElementCallSystemProviding`
   and `ElementCallRoomContextProtocol` be `ElementCallRoomContext`. The host asked for it: element-x-ios
@@ -420,10 +459,11 @@ so the type system forbids that. Keep it that way.
   carry the suffix throughout. Uniform rather than selective, so the rule can be stated in one line
   — including on the four that read as capabilities and so double up a little. **Do not "correct"
   these back**; the concrete types that implement them (`ElementCallTokenTheme`,
-  `ElementCallSDKTransport`, the `ElementCallFake*` family) keep plain names, which is what makes the
-  suffix carry information. So does a port that is a plain value rather than something a host
-  implements — `ElementCallOptions` and `ElementCallStrings` are structs with every member defaulted,
-  and the suffix would be a lie on them.
+  `ElementCallFakeMatrixBackend`, the rest of the `ElementCallFake*` family) keep plain names, which
+  is what makes the suffix carry information. So does a port that is a plain value rather than something a host
+  implements — `ElementCallOptions` is a struct with every member defaulted,
+  and the suffix would be a lie on it. The core's `MatrixBackend` is not ours and keeps its name;
+  hosts implement `ElementCallMatrixBackendProtocol` instead.
 - `MatrixRTC*` prefixed types name **protocol** concepts and keep that prefix. `ElementCall*` names our
   own API. Note the casing: the initialism is uniform, per the API design guidelines below. The
   bindings' own module is `MatrixRtc`, spelled exactly that way, and `import MatrixRtc` plus the

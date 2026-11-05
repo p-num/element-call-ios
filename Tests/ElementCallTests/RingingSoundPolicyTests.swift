@@ -27,7 +27,7 @@ nonisolated struct RingingSoundPolicyTests {
     func onlyADeclineAndATimeoutHaveAnEndSound() {
         #expect(RingingSoundPolicy.endSound(.ended(.declined)) == .declined)
         #expect(RingingSoundPolicy.endSound(.ended(.unanswered)) == .timeout)
-        for reason in [MatrixRTCEndReason.left, .othersLeft, .ringNotSent, .empty, .slotClosed, .connectionClosed(message: "")] {
+        for reason in [MatrixRTCEndReason.left, .othersLeft, .ringNotSent, .empty, .slotClosed, .connectionClosed(reason: .budget, message: "")] {
             #expect(RingingSoundPolicy.endSound(.ended(reason)) == nil)
         }
         #expect(RingingSoundPolicy.endSound(ringing) == nil)

@@ -27,9 +27,9 @@ public nonisolated struct MatrixRTCLogRecord: Sendable {
     /// `MatrixRTCLogBridge.swift`.
     public let file: String?
     public let line: UInt32?
-    /// Milliseconds since the Unix epoch, captured when the record was *emitted*. Delivery is
-    /// asynchronous, so a host stamping its own receive time is stamping the wrong moment.
-    public let timestampMs: UInt64
+    /// When the record was *emitted*. Delivery is asynchronous, so a host stamping its own receive
+    /// time is stamping the wrong moment.
+    public let timestamp: Date
     /// The Rust thread the record was emitted on.
     public let thread: String
 }
@@ -66,7 +66,7 @@ public nonisolated enum MatrixRTCLogging {
                               message: "Failed installing the log sink: \(error)",
                               file: nil,
                               line: nil,
-                              timestampMs: UInt64(Date().timeIntervalSince1970 * 1000),
+                              timestamp: .now,
                               thread: Thread.current.description))
                 return false
             }
@@ -86,7 +86,7 @@ public nonisolated enum MatrixRTCLogging {
                           message: record.message,
                           file: record.file,
                           line: record.line,
-                          timestampMs: record.timestampMs,
+                          timestamp: Date(timeIntervalSince1970: Double(record.timestampMs) / 1000),
                           thread: record.thread))
         }
     }

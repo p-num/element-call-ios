@@ -29,27 +29,26 @@ that reason as much as for keeping a reviewer's diff small.
 
 ## The boundaries this package defends
 
-Three of the four modules must compile knowing nothing about the host application, and one of them is
-allowed to know the SDK:
+The three modules must compile knowing nothing about the host application, its SDK included:
 
 | Module | May import |
 | --- | --- |
 | `ElementCallKit` | the RTC core only |
 | `ElementCallHost` | nothing beyond the RTC core |
 | `ElementCallUI` | the design **tokens** package |
-| `ElementCallMatrix` | the Matrix SDK |
 
 Concretely:
 
-- **`MatrixRustSDK` only in `ElementCallMatrix`.** That module exists to speak to the SDK, so the rule
-  would protect nothing there. Everywhere else, go through `ElementCallMatrixTransportProtocol`.
+- **Never `import MatrixRustSDK` in the package.** The host implements
+  `ElementCallMatrixBackendProtocol`; the only SDK code here is the reference backend in
+  `Example/ElementCallExample/Matrix`.
 - **Never `import Compound`, anywhere.** Its colours live on a single shared instance the host
   re-brands at runtime, so a copy linked in here would never see the override and a re-branded host
   would get a stock-coloured call screen. Take colours through `ElementCallThemeProtocol` and icons through
   `ElementCallIconRenderingProtocol`, and keep every member a computed property so it is read at draw time.
   The `CompoundDesignTokens` package is fine: static values, no shared instance.
-- **No host logger, settings or localisation.** Those are `ElementCallLoggingProtocol`, `ElementCallOptions`
-  and `ElementCallStrings`.
+- **No host logger or settings.** Those are `ElementCallLoggingProtocol` and `ElementCallOptions`.
+  Text is translated here, not by the host; see [Strings](#strings).
 
 SwiftLint enforces the first two at error severity. If you need something new from the host, add a
 port rather than a dependency.
@@ -58,6 +57,20 @@ Accessibility identifiers on the call UI are **public API**. An external interop
 host builds through them, so treat a rename as a breaking change. `ElementCallAccessibilityIdentifiers`
 has tests asserting the exact strings, which exist to make a rename a deliberate act rather than a
 surprise.
+
+## Strings
+
+The call screen's text comes from the [element-call Localazy project](https://localazy.com/p/element-call),
+from the file `mobile.json`, which Element Call Android downloads too. Nothing here uploads to it.
+
+1. Add the string in Localazy's dashboard, to `mobile.json`. The key starts with `element_call_` and
+   ends in `_ios` if only iOS uses it. Placeholders are numbered: `%1$s`, `%1$d`.
+2. Run `scripts/download-strings.sh` (needs `brew install localazy/tools/localazy swiftgen`). It
+   writes `Localizable.strings` and regenerates `L10n`.
+3. Use `L10n` in code, never a literal.
+
+Never edit `Localizable.strings` or `Generated/Strings.swift` by hand. Translations arrive in a pull
+request the Translations workflow opens every Monday.
 
 ## Etiquette
 
@@ -121,7 +134,7 @@ workflow reads, so there is one place to change them.
 | --- | --- |
 | Pure logic | `Tests/ElementCallTests`, runs anywhere |
 | Snapshots from previews | same target, needs the pinned simulator |
-| Widget bridge wire protocol | same target, fakes the driver channel with a pair of pipes |
+| Reference SDK backend's mappings | `Example/ElementCallExampleTests`, hostless |
 | Real media call | needs the `demo/backend` docker stack from matrix-rust-rtc, run by hand |
 
 Add previews for every main state of a view, conform them to `TestablePreview`, and use

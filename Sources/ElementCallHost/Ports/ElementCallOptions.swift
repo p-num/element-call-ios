@@ -28,8 +28,9 @@ public nonisolated struct ElementCallOptions: Sendable {
     /// Whether a minimized call may open a Picture in Picture window. A host without the
     /// background mode entitlement should set this false, and calls minimize to the bar instead.
     public var isPictureInPictureEnabled: Bool
-    /// How membership is published. Pinned by the host because it has to match the other clients in
-    /// the room, and it cannot change once a session has joined.
+    /// How membership is published. Chosen by the host because it has to match the other clients in
+    /// the room, and it cannot change once a session has joined. Room state by default; the sticky
+    /// formats need an open `m.rtc.slot` in the room.
     public var membershipFormat: MatrixRTCMembershipFormat
     /// Whether the call screen offers its developer affordances, currently the per-tile stats
     /// overlay. That is raw RTP counters in 9pt monospace, so this belongs on whatever a host
@@ -60,19 +61,28 @@ public nonisolated struct ElementCallOptions: Sendable {
     /// Join and leave sounds have no off switch, as on web; this is the only thing that quiets them.
     /// Any switch for other sound effects, such as reactions, is a separate option.
     public var participantCapForJoinLeaveSounds: Int
+    /// Whether our media may move to another member's media server once ours has been down for
+    /// ten seconds while the homeserver answers and a peer's server is up (034 R25). Off by
+    /// default, because it only works where that server accepts users from other homeservers, and
+    /// which deployments do is something only the host can know: the homeserver's transport list
+    /// cannot say, since the SDK drops every field of a LiveKit entry but its URL. Read when media
+    /// connects.
+    public var isSFUFallbackEnabled: Bool
     
     public init(isPictureInPictureEnabled: Bool = true,
                 membershipFormat: MatrixRTCMembershipFormat = .roomState,
                 isDeveloperModeEnabled: Bool = false,
                 isScreenSharingEnabled: Bool = false,
                 isAutomaticPictureInPictureForAudioCallsEnabled: Bool = false,
-                participantCapForJoinLeaveSounds: Int = MatrixRTCMediaSession.defaultParticipantCapForJoinLeaveSounds) {
+                participantCapForJoinLeaveSounds: Int = MatrixRTCMediaSession.defaultParticipantCapForJoinLeaveSounds,
+                isSFUFallbackEnabled: Bool = false) {
         self.isPictureInPictureEnabled = isPictureInPictureEnabled
         self.membershipFormat = membershipFormat
         self.isDeveloperModeEnabled = isDeveloperModeEnabled
         self.isScreenSharingEnabled = isScreenSharingEnabled
         self.isAutomaticPictureInPictureForAudioCallsEnabled = isAutomaticPictureInPictureForAudioCallsEnabled
         self.participantCapForJoinLeaveSounds = participantCapForJoinLeaveSounds
+        self.isSFUFallbackEnabled = isSFUFallbackEnabled
     }
 }
 

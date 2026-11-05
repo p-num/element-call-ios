@@ -1,0 +1,75 @@
+{
+  "readKey": "a7580769542256117579-70975387172511848f4c6533943d776547bad4853931ba352ee684b738f4494e",
+
+  "conversion": {
+    "actions": [
+      {
+        "type": "ios-strings",
+        "output": "Sources/ElementCallHost/Resources/Localizations/${iosLprojFolder}/Localizable.strings",
+        "excludeKeys": ["REGEX:.*_android"],
+        "conditions": [
+          "equals: ${languageCode}, en | equals: ${file}, mobile.json"
+        ],
+        "filterPlurals": true,
+        "replacements": {
+          "%s": "%@",
+          "$s": "$@"
+        },
+        "params": {
+          "flatten_keys": "underscore"
+        }
+      },
+      {
+        "type": "ios-stringsdict",
+        "output": "Sources/ElementCallHost/Resources/Localizations/${iosLprojFolder}/Localizable.stringsdict",
+        "excludeKeys": ["REGEX:.*_android"],
+        "conditions": [
+          "equals: ${languageCode}, en | equals: ${file}, mobile.json"
+        ],
+        "replacements": {
+          "%s": "%@",
+          "$s": "$@"
+        },
+        "params": {
+          "variable": "COUNT",
+          "flatten_keys": "underscore"
+        }
+      },
+
+      {
+        "group": "all",
+        "type": "ios-strings",
+        "output": "Sources/ElementCallHost/Resources/Localizations/${iosLprojFolder}/Localizable.strings",
+        "excludeKeys": ["REGEX:.*_android"],
+        "conditions": [
+          "equals: ${file}, mobile.json"
+        ],
+        "filterPlurals": true,
+        "replacements": {
+          "%s": "%@",
+          "$s": "$@"
+        },
+        "params": {
+          "flatten_keys": "underscore"
+        }
+      },
+      {
+        "group": "all",
+        "type": "ios-stringsdict",
+        "output": "Sources/ElementCallHost/Resources/Localizations/${iosLprojFolder}/Localizable.stringsdict",
+        "excludeKeys": ["REGEX:.*_android"],
+        "conditions": [
+          "equals: ${file}, mobile.json"
+        ],
+        "replacements": {
+          "%s": "%@",
+          "$s": "$@"
+        },
+        "params": {
+          "variable": "COUNT",
+          "flatten_keys": "underscore"
+        }
+      }
+    ]
+  }
+}

@@ -86,6 +86,10 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
     static let linger: Duration = .seconds(2)
     
     private let open: @Sendable () -> VideoFrameStreamBox?
+    /// Whose stream this is, for the log: `member/kind`.
+    private let label: String
+    /// Numbers the readers, so the log tells a reader parked on an old stream from its successor.
+    private let readers = Mutex<Int>(0)
     /// Called when the last tile has gone and the linger elapsed: nobody is drawing this stream.
     private let onIdle: @Sendable () -> Void
     /// What the linger runs on: the call's clock, so a scenario can step past it. The fifth timer
@@ -103,9 +107,11 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
         var lingerTask: Task<Void, Never>?
     }
     
-    init(open: @escaping @Sendable () -> VideoFrameStreamBox?,
+    init(label: String = "",
+         open: @escaping @Sendable () -> VideoFrameStreamBox?,
          onIdle: @escaping @Sendable () -> Void,
          clock: any Clock<Duration> = ContinuousClock()) {
+        self.label = label
         self.open = open
         self.onIdle = onIdle
         self.clock = clock
@@ -114,6 +120,7 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
     func attach(_ slot: VideoFrameSlot) {
         state.withLock { state in
             state.slots[slot.id] = slot
+            MatrixRTCLog.info("Video \(label): slot attached (\(state.slots.count) drawing, reader \(state.reader == nil ? "none" : "kept"))")
             state.lingerTask?.cancel()
             state.lingerTask = nil
             if state.reader == nil {
@@ -122,9 +129,15 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
         }
     }
     
+    /// Whether this slot is attached here: false for one whose source was closed under it.
+    func holds(_ slot: VideoFrameSlot) -> Bool {
+        state.withLock { $0.slots[slot.id] != nil }
+    }
+    
     func detach(_ slot: VideoFrameSlot) {
         state.withLock { state in
             state.slots[slot.id] = nil
+            MatrixRTCLog.info("Video \(label): slot detached (\(state.slots.count) drawing)")
             slot.clear()
             guard state.slots.isEmpty, state.lingerTask == nil else { return }
             let clock = clock
@@ -136,7 +149,32 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
         }
     }
     
+    /// The member's track was replaced: read the new one. The old reader is parked on a track that
+    /// will never send again, so it is cancelled rather than waited for, and it can no longer offer
+    /// a frame if that track does wake. Opening here does not break the rule below, which is about
+    /// two streams on one track. With no tile drawing, the next attach opens it.
+    func reopen() {
+        MatrixRTCLog.info("Video \(label): reopening on a new track")
+        state.withLock { state in
+            state.reader?.cancel()
+            state.reader = state.slots.isEmpty ? nil : startReader()
+        }
+    }
+    
+    /// The member left: stop reading their track and blank the tiles, but keep the tiles attached.
+    /// A member who comes back within one layout pass keeps their tile mounted, and that tile never
+    /// attaches again; their returning stream then reopens here, onto the tiles still held.
+    func suspend() {
+        MatrixRTCLog.info("Video \(label): suspended, the member left")
+        state.withLock { state in
+            state.reader?.cancel()
+            state.reader = nil
+            state.slots.values.forEach { $0.clear() }
+        }
+    }
+    
     func close() {
+        MatrixRTCLog.info("Video \(label): closed")
         state.withLock { state in
             state.reader?.cancel()
             state.reader = nil
@@ -157,6 +195,7 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
             return true
         }
         if idle {
+            MatrixRTCLog.info("Video \(label): idle, nobody drawing; the reader is kept")
             onIdle()
         }
     }
@@ -169,14 +208,28 @@ final nonisolated class RemoteVideoSource: @unchecked Sendable {
     
     private func startReader() -> Task<Void, Never> {
         let open = open
+        let label = label
+        let number = readers.withLock { count -> Int in
+            count += 1
+            return count
+        }
         return Task.detached(priority: .userInitiated) { [weak self] in
             guard let stream = open() else {
-                MatrixRTCLog.warning("No video stream to open")
+                MatrixRTCLog.warning("Video \(label): reader \(number) found no stream to open")
                 return
             }
-            defer { stream.close() }
+            MatrixRTCLog.info("Video \(label): reader \(number) opened its stream")
+            var frames = 0
+            defer {
+                stream.close()
+                MatrixRTCLog.info("Video \(label): reader \(number) ended after \(frames) frame(s)\(Task.isCancelled ? ", cancelled" : "")")
+            }
             while !Task.isCancelled, let ref = await stream.next() {
-                guard let self else { return }
+                guard let self, !Task.isCancelled else { return }
+                frames += 1
+                if frames == 1 {
+                    MatrixRTCLog.info("Video \(label): reader \(number) got its first frame")
+                }
                 let frame = MatrixRTCVideoFrame(ref: ref)
                 reportAspect(of: frame)
                 let slots = state.withLock { Array($0.slots.values) }

@@ -44,6 +44,78 @@ struct ScriptedSessionTests {
         await player.call.disconnect()
     }
     
+    /// The record a host's indicator draws from, pushed as the core would push an outage, and
+    /// starting empty (034 C5).
+    @Test
+    func anInterruptionsRecordReachesTheCall() async throws {
+        let player = try MatrixRTCScenarioPlayer(scenario: MatrixRTCScenario.parse("0s B", name: "t"))
+        await player.start()
+        #expect(player.call.interruptions == .none)
+        
+        let outage = MatrixRTCInterruptions(signalling: .unreachable(since: Date(timeIntervalSince1970: 1)), membersReconnecting: [a("B").memberID])
+        player.session.push(interruptions: outage)
+        for _ in 0..<1000 where player.call.interruptions != outage {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(player.call.interruptions == outage)
+        await player.call.disconnect()
+    }
+    
+    /// The tiles follow a pushed record, as the core's do, so a fixture scripts one and gets both.
+    @Test
+    func theTilesFollowAPushedRecord() async throws {
+        let player = try MatrixRTCScenarioPlayer(scenario: MatrixRTCScenario.parse("0s B C", name: "t"))
+        await player.start()
+        _ = await player.step()
+        
+        player.session.push(interruptions: MatrixRTCInterruptions(ownMedia: .reconnecting,
+                                                                  membersReconnecting: [a("B").memberID],
+                                                                  unableToDecrypt: [a("C").memberID]))
+        for _ in 0..<1000 where player.call.tiles.detail[a("B")]?.connection != .reconnecting {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(player.call.tiles.detail[a("B")]?.connection == .reconnecting)
+        #expect(player.call.tiles.detail[a("C")]?.unableToDecrypt == .missingKey)
+        #expect(player.call.ownTile?.connection == .reconnecting)
+        
+        player.session.push(interruptions: .none)
+        for _ in 0..<1000 where player.call.tiles.detail[a("B")]?.connection != .connected {
+            try await Task.sleep(for: .milliseconds(5))
+        }
+        #expect(player.call.tiles.detail[a("C")]?.unableToDecrypt == nil)
+        await player.call.disconnect()
+    }
+    
+    /// The keys count as missing once the spinner has had its wait, stop the moment they come, and
+    /// the next spell waits again (034 Q8).
+    @Test
+    func aSpellOutlastingTheWaitIsMissingKeys() async throws {
+        let player = try MatrixRTCScenarioPlayer(scenario: MatrixRTCScenario.parse("0s B C", name: "t"))
+        await player.start()
+        _ = await player.step()
+        let bob = a("B").memberID
+        
+        player.session.push(interruptions: MatrixRTCInterruptions(unableToDecrypt: [bob]))
+        try await waitFor { player.call.interruptions.unableToDecrypt == [bob] }
+        player.clock.advance(by: MatrixRTCMediaSession.keysMissingAfter - .milliseconds(1))
+        await player.settle()
+        #expect(player.call.membersMissingKeys.isEmpty)
+        player.clock.advance(by: .milliseconds(1))
+        await player.settle()
+        #expect(player.call.membersMissingKeys == [bob])
+        
+        player.session.push(interruptions: .none)
+        try await waitFor { player.call.interruptions.unableToDecrypt.isEmpty }
+        #expect(player.call.membersMissingKeys.isEmpty)
+        
+        player.session.push(interruptions: MatrixRTCInterruptions(unableToDecrypt: [bob]))
+        try await waitFor { player.call.interruptions.unableToDecrypt == [bob] }
+        player.clock.advance(by: MatrixRTCMediaSession.keysMissingAfter - .milliseconds(1))
+        await player.settle()
+        #expect(player.call.membersMissingKeys.isEmpty)
+        await player.call.disconnect()
+    }
+    
     @Test
     func ourOwnTileFollowsTheMeFrame() async throws {
         let scenario = try MatrixRTCScenario.parse("0s B\n1s me vm", name: "t")

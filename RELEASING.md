@@ -160,7 +160,8 @@ dispatch again.
 
 **Never delete and re-push a tag to retry.** A host may already have resolved it, and SwiftPM caches
 by tag, so a tag that changes meaning is far worse than a missing release page. Release a new patch
-instead.
+instead. Once the release is published, immutability enforces this: its tag can be neither moved nor
+reused.
 
 ## Bump the host
 
@@ -233,7 +234,7 @@ instead whether the `Tests` workflow already passed for the **exact commit** bei
 which of "no run at all", "still running" and "failed" it found.
 
 That is on purpose: `XCODE_APP`, `SIMULATOR_NAME` and `SIMULATOR_RUNTIME` are already duplicated
-between `tests.yml` and `record-snapshots.yml` (and `AGENTS.md`, and
+across `tests.yml`, `record-snapshots.yml` and `ui-tests.yml` (and `AGENTS.md`, and
 `Tests/ElementCallTests/Support/SnapshotEnvironment.swift`), and a release job that ran the tests
 itself would be another copy to keep in step. So the release gates on that run rather than repeating
 it — and a commit nobody has tested cannot be released.
@@ -265,20 +266,12 @@ binary xcframework in the Element org is a Rust FFI artifact; every pure-Swift p
 (`compound-ios`, `compound-design-tokens`, `matrix-analytics-events`) ships as source.
 
 Building one here is possible — `xcodebuild archive` plus `-create-xcframework` with
-`BUILD_LIBRARY_FOR_DISTRIBUTION=YES` — so this is a choice. Two things pay for it not being made:
+`BUILD_LIBRARY_FOR_DISTRIBUTION=YES` — so this is a choice. What pays for it not being made is that
+**library evolution is ongoing work** across hundreds of public declarations in three SwiftUI-heavy
+modules, and there is no build-time problem today that would pay for it.
 
-1. **It would re-impose the coupling `Package.swift` exists to avoid.**
-   `ElementCallSDKTransport.init?(client:)` takes a `MatrixRustSDK.Client`, so that module appears in
-   the module interface. The manifest declares `MatrixRustSDK` as a deliberately wide
-   `"26.09.01" ..< "100.0.0"`, and the comment there explains why pinning it exactly is unacceptable.
-   A prebuilt binary is compiled against whichever SDK version CI happened to have, of a
-   Rust-generated API that turns over monthly.
-2. **Library evolution is ongoing work** across 452 public declarations in four SwiftUI-heavy
-   modules, and there is no build-time problem today that would pay for it.
-
-**Revisit it** if a clean element-x-ios build starts spending real time in these four modules. Even
-then the cheaper answers come first: a prebuilt dependency cache in the host's CI, or splitting
-`ElementCallMatrix` so its SDK-typed surface is the only part left as source.
+**Revisit it** if a clean element-x-ios build starts spending real time in these three modules. Even
+then the cheaper answer comes first: a prebuilt dependency cache in the host's CI.
 
 ## Rehearsing locally
 
@@ -329,6 +322,10 @@ LABELS
 The ten `pr-` labels must exist before the first release, because `.github/release.yml` reads them
 — nine to categorise by and `pr-task` to exclude — and a label that does not exist cannot be
 applied. Keep this list and that file in step.
+
+**Release immutability is on** (Settings → General → Releases): a published release and its tag
+never change. The workflow needs nothing for it, because the release carries no assets and is
+complete the moment it is created.
 
 | Secret | Used for |
 | --- | --- |

@@ -152,8 +152,24 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         return nil
     }
     
+    /// Parks like `nextEvent()`, for the same reason.
+    func nextInterruptions() async -> FfiInterruptions? {
+        try? await Task.sleep(for: .seconds(3600))
+        return nil
+    }
+    
     func roster() -> FfiTileRoster {
         FfiTileRoster(order: [], detail: [])
+    }
+    
+    func interruptions() -> FfiInterruptions {
+        FfiInterruptions(signalling: .reachable,
+                         ownMembershipLapsed: false,
+                         ownMedia: .connected,
+                         membersReconnecting: [],
+                         membersUnreachable: [],
+                         unableToDecrypt: [],
+                         unmappable: [])
     }
     
     func localState() -> FfiLocalState? {

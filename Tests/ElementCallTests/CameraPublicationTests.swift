@@ -211,6 +211,6 @@ struct CameraPublicationTests {
             }
             try await clock.sleep(for: .milliseconds(1))
         }
-        throw FakeRtcCall.RefusedError()
+        throw FakeRTCCall.RefusedError()
     }
 }

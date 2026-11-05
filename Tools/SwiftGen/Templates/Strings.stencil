@@ -1,0 +1,52 @@
+// swiftlint:disable all
+// Generated using SwiftGen, from Tools/SwiftGen/Templates/Strings.stencil. Do not edit: run scripts/download-strings.sh.
+
+{% if tables.count > 0 %}
+import Foundation
+
+{% macro parametersBlock types %}{% filter removeNewlines:"leading" %}
+  {% for type in types %}
+    {% if type == "String" %}
+    _ p{{forloop.counter}}: Any
+    {% else %}
+    _ p{{forloop.counter}}: {{type}}
+    {% endif %}
+    {{ ", " if not forloop.last }}
+  {% endfor %}
+{% endfilter %}{% endmacro %}
+{% macro argumentsBlock types %}{% filter removeNewlines:"leading" %}
+  {% for type in types %}
+    {% if type == "String" %}
+    String(describing: p{{forloop.counter}})
+    {% else %}
+    p{{forloop.counter}}
+    {% endif %}
+    {{ ", " if not forloop.last }}
+  {% endfor %}
+{% endfilter %}{% endmacro %}
+{% macro recursiveBlock table item %}
+  {% for string in item.strings %}
+  {% for line in string.translation|split:"\n" %}
+  /// {{line}}
+  {% endfor %}
+  {% if string.types %}
+  package static func {{string.name|replace:"element_call_",""|swiftIdentifier:"pretty"|lowerFirstWord|escapeReservedKeywords}}({% call parametersBlock string.types %}) -> String {
+    ElementCallLocalization.string("{{table}}", "{{string.key}}", {% call argumentsBlock string.types %})
+  }
+  {% else %}
+  package static var {{string.name|replace:"element_call_",""|swiftIdentifier:"pretty"|lowerFirstWord|escapeReservedKeywords}}: String { ElementCallLocalization.string("{{table}}", "{{string.key}}") }
+  {% endif %}
+  {% endfor %}
+  {% for child in item.children %}
+
+  package enum {{child.name|swiftIdentifier:"pretty"|escapeReservedKeywords}} {
+    {% filter indent:2 %}{% call recursiveBlock table child %}{% endfilter %}
+  }
+  {% endfor %}
+{% endmacro %}
+package nonisolated enum {{param.enumName|default:"L10n"}} {
+  {% call recursiveBlock tables.first.name tables.first.levels %}
+}
+{% else %}
+// No string found
+{% endif %}

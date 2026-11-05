@@ -132,7 +132,7 @@ struct HostConnectionTests {
         #expect(fixture.system.requests == [.connected(roomID: fixture.room.roomID)])
         
         let replacement = replaceMedia(in: fixture, connection: .connectingMedia)
-        fixture.transport.answerPublish(failingWith: FakeRtcCall.RefusedError())
+        fixture.transport.answerPublish(failingWith: FakeRTCCall.RefusedError())
         await startup.value
         #expect(fixture.controller.call === replacement)
         #expect(fixture.controller.connection == .connectingMedia)
@@ -375,7 +375,7 @@ struct HostConnectionTests {
         await replacement.disconnect()
     }
     
-    @Test(arguments: [ElementCallConnection.idle, .joining, .ended(.left), .failed("failed")])
+    @Test(arguments: [ElementCallConnection.idle, .joining, .ended(.left), .failed(.other("failed"))])
     func ownMediaEventsCannotConnectAnUnreadyOrTerminalHost(connection: ElementCallConnection) async throws {
         let fixture = Fixture(connection: connection)
         await fixture.media.start()
@@ -417,18 +417,18 @@ struct HostConnectionTests {
         let system = ElementCallFakeSystem()
         let transport: FakeMediaSession
         let media: MatrixRTCMediaSession
-        let rtcDriver: FakeRtcCall
+        let rtcDriver: FakeRTCCall
         let rtcCall: MatrixRTCCall
         let controller: ElementCallController
         
         init(connection: ElementCallConnection, connectedAt: Date? = nil,
              isAudioCall: Bool = true, holdingPublish: FfiStreamKind? = nil) {
-            rtcDriver = FakeRtcCall()
+            rtcDriver = FakeRTCCall()
             rtcCall = MatrixRTCCall(rtcCall: rtcDriver)
             rtcCall.start()
             transport = FakeMediaSession(holdingPublish: holdingPublish)
             media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
-            controller = ElementCallController(rtcClient: MatrixRTCClient(transport: ElementCallFakeTransport()),
+            controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: system, options: .init(), style: .stock, logger: nil)
             controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                        room: room, connection: connection, connectedAt: connectedAt, call: media, rtcCall: rtcCall)
@@ -465,6 +465,6 @@ struct HostConnectionTests {
             }
             await Task.yield()
         }
-        throw FakeRtcCall.RefusedError()
+        throw FakeRTCCall.RefusedError()
     }
 }

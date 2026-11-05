@@ -9,8 +9,8 @@ import XCTest
 
 /// The raise hand button, driven by real touches (spec 009).
 ///
-/// Whether it is offered, what it shows while a change is pending and where a hand is drawn are
-/// `RaisedHandTests`, in process. What is here is what only a touch can answer: whether the button
+/// Whether it is offered, what it shows and where a hand is drawn are `RaisedHandTests`, in
+/// process. What is here is what only a touch can answer: whether the button
 /// in the bar takes the tap over the stage beneath it, in portrait, in landscape and in the
 /// full-screen controls (009 R16, R30), and whether that tap stops at the button rather than also
 /// reaching the tile behind or the full-screen chrome's own tap.
