@@ -27,14 +27,6 @@ struct ElementCallPreferencesSheet: View {
     @Environment(\.elementCallStyle) private var style
     @State private var height: CGFloat = 300
     @State private var bottomInset: CGFloat = 0
-    private let version: String
-    private let coreVersion: String
-    
-    init(context: ElementCallScreenContext, version: String = ElementCallVersion.current, coreVersion: String = ElementCallVersion.core) {
-        self.context = context
-        self.version = version
-        self.coreVersion = coreVersion
-    }
     
     var body: some View {
         VStack(spacing: 0) {
