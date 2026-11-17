@@ -148,12 +148,36 @@ public nonisolated struct MatrixRTCLeaveReason: Sendable, Hashable {
     }
 }
 
+/// The core's evidence for one actual join, not a media connection or a membership event refresh.
+/// Keep this typed until the host derives its participation digest; these values are not analytics
+/// properties and must not be forwarded as raw identifiers or timestamps.
+public nonisolated enum MatrixRTCParticipationGeneration: Sendable, Hashable {
+    /// The member ID is fresh for this join and stable across refreshes.
+    case perJoinMemberID
+    /// Legacy member IDs can be reused; the exact unsigned creation timestamp separates joins.
+    case legacy(createdTimestampMilliseconds: UInt64)
+    /// Neither supported generation is known. The host must keep correlation unbound.
+    case unavailable
+}
+
 public nonisolated struct MatrixRTCMembership: Sendable, Hashable, Identifiable {
     public let memberID: String
     public let userID: String
     public let deviceID: String?
     public let application: String?
+    public let participationGeneration: MatrixRTCParticipationGeneration
     
+    init(memberID: String, userID: String, deviceID: String?, application: String?,
+         participationGeneration: MatrixRTCParticipationGeneration = .unavailable) {
+        self.memberID = memberID
+        self.userID = userID
+        self.deviceID = deviceID
+        self.application = application
+        self.participationGeneration = participationGeneration
+    }
+    
+    /// Roster identity only. A legacy device can reuse it on a later join; correlation must also
+    /// include ``participationGeneration``, the call's room and slot, and this membership's sender.
     public var id: String {
         memberID
     }

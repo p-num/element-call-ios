@@ -45,6 +45,26 @@ struct CallAnalyticsTests {
         fixture.expectNoIdentifiers()
     }
     
+    @Test
+    func membershipGenerationStaysOutOfNativeAnalytics() async throws {
+        let fixture = Fixture(isDirect: false)
+        fixture.scriptJoin(status: connected)
+        fixture.start(voiceCall)
+        try await fixture.waitForOutcome()
+        let rtcCall = try #require(fixture.controller.rtcCall)
+        rtcCall.updateMembers([MatrixRTCMembership(memberID: "secret-member", userID: "@secretuser:secret.example.org",
+                                                   deviceID: "SECRETDEVICE", application: "m.call",
+                                                   participationGeneration: .legacy(createdTimestampMilliseconds: UInt64.max))])
+        try await fixture.hangUp()
+        #expect(fixture.names == ["CallJoinAttempted", "CallJoinOutcome", "CallParticipationEnded"])
+        fixture.expectNoIdentifiers()
+        for event in fixture.events {
+            #expect(!event.properties.values.contains(.string(String(UInt64.max))))
+            #expect(event.properties["participationGeneration"] == nil)
+            #expect(event.properties["membershipTs"] == nil)
+        }
+    }
+    
     /// R8: connected while it rings, once our microphone is up; never at the pickup. An unanswered
     /// ring is an end, not a failure (R12), with only ourselves in it (R26).
     @Test

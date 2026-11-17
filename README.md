@@ -126,6 +126,31 @@ sends the moment the server is back. Without it the call notices at its next sen
 
 Every port has a fake shipped alongside it, so previews and tests need no host at all.
 
+### Membership correlation and analytics
+
+`controller.rtcCall?.membershipSnapshots()` gives each observer the current authoritative Matrix
+membership and ordered updates, including empty sets, without consuming the controller's status or
+media streams. `MatrixRTCMembership.participationGeneration` tells the host which generation the core
+can prove: a fresh per-join member ID, a legacy creation timestamp, or unavailable. Legacy timestamps
+remain exact `UInt64` values, including zero; a missing timestamp never falls back to the latest
+membership event ID, a receipt time or the user/device identity. A sticky event refresh keeps the
+generation, while a later legacy join can reuse `memberID` with a different generation. The existing
+`id` property is roster identity and is insufficient for participation correlation by itself.
+
+Keep the raw room, slot, sender, member and generation inputs local. A consenting host derives the
+versioned participation digest and emits only digests for session binding and overlap edges. An
+unavailable generation stays unbound, and an empty snapshot establishes no overlap. These digests are
+provisional graph roots, not immutable global call IDs. This package adds no network sender or
+signaling field. `CallJoinAttempted`, `CallJoinOutcome`, `CallFailure` and `CallParticipationEnded`
+retain their upstream names and properties; forward them unchanged through `ElementCallAnalyticsProtocol`.
+
+The additive mapper requires RTC bindings with `JoinedMembership.membershipTs` and
+`identityKind: FfiMembershipIdentityKind` (`perJoinMemberId`, `legacyMembershipTimestamp`, `unavailable`).
+Its generated Swift and media binary must come from the same build. Before building or releasing this
+branch, publish that matching RTC artifact and adopt its exact package pin and checksum; copying only
+new bindings over an older binary is not compatible. The existing published pin is deliberately
+unchanged while that artifact is pending.
+
 ### Theming, and why it is a port
 
 Colours and fonts are **computed properties read at draw time**, never captured once. Element's design

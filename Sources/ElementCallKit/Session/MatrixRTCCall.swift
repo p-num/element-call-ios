@@ -114,6 +114,9 @@ public final class MatrixRTCCall {
     
     /// Each observer gets the current Matrix membership and subsequent changes. SFU reconnects
     /// do not imply departure, and multiple devices of one user remain separate memberships.
+    /// Includes the core's participation generation without taking the controller's single-reader
+    /// status or media streams. Raw membership inputs stay local; a host exporting correlation
+    /// sends only participation digests, with its usage-analytics consent.
     public func membershipSnapshots() -> AsyncStream<[MatrixRTCMembership]> {
         let id = UUID()
         return AsyncStream { continuation in

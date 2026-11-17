@@ -227,10 +227,20 @@ private nonisolated extension Date {
 
 nonisolated extension MatrixRTCMembership {
     init(_ membership: JoinedMembership) {
+        let generation: MatrixRTCParticipationGeneration
+        switch membership.identityKind {
+        case .perJoinMemberId:
+            generation = .perJoinMemberID
+        case .legacyMembershipTimestamp:
+            generation = membership.membershipTs.map { .legacy(createdTimestampMilliseconds: $0) } ?? .unavailable
+        case .unavailable:
+            generation = .unavailable
+        }
         self.init(memberID: membership.memberId,
                   userID: membership.sender,
                   deviceID: membership.senderDeviceId,
-                  application: membership.application)
+                  application: membership.application,
+                  participationGeneration: generation)
     }
 }
 
