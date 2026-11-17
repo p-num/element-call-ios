@@ -205,6 +205,54 @@ public final class ElementCallFakePreferencesStore: ElementCallPreferencesStoreP
     }
 }
 
+/// Permissions a test sets, granted by default so a call never meets the system's dialog. Every
+/// request is recorded in order. Set ``answers`` to hold a dialog open and answer it later; without
+/// it a `notAsked` request answers ``answerWhenAsked`` and the permission takes that answer.
+@MainActor
+public final class ElementCallFakeMediaPermissions: ElementCallMediaPermissionsProtocol {
+    public var microphone: ElementCallMediaPermission
+    public var camera: ElementCallMediaPermission
+    public var answerWhenAsked = true
+    public var answers: ((ElementCallMediaDevice) async -> Bool)?
+    public private(set) var requests: [ElementCallMediaDevice] = []
+    public private(set) var openSettingsCount = 0
+    
+    public init(microphone: ElementCallMediaPermission = .granted, camera: ElementCallMediaPermission = .granted) {
+        self.microphone = microphone
+        self.camera = camera
+    }
+    
+    public func permission(for device: ElementCallMediaDevice) -> ElementCallMediaPermission {
+        switch device {
+        case .microphone: microphone
+        case .camera: camera
+        }
+    }
+    
+    public func request(_ device: ElementCallMediaDevice) async -> Bool {
+        requests.append(device)
+        switch permission(for: device) {
+        case .granted: return true
+        case .refused: return false
+        case .notAsked: break
+        }
+        let granted = if let answers {
+            await answers(device)
+        } else {
+            answerWhenAsked
+        }
+        switch device {
+        case .microphone: microphone = granted ? .granted : .refused
+        case .camera: camera = granted ? .granted : .refused
+        }
+        return granted
+    }
+    
+    public func openSettings() {
+        openSettingsCount += 1
+    }
+}
+
 public extension ElementCallController {
     /// A controller with faked dependencies, for previews and snapshot tests. Never joins anything.
     static func fake(connection: ElementCallConnection,
@@ -223,18 +271,23 @@ public extension ElementCallController {
                      style: ElementCallStyle = .stock,
                      // A scripted call (`MatrixRTCScenarioPlayer`), so a real view model can run
                      // over a controller that never joined. Nil for the stills the previews want.
-                     call: MatrixRTCMediaSession? = nil) -> ElementCallController {
+                     call: MatrixRTCMediaSession? = nil,
+                     // A membership, for the controls that need one, the hand and reactions. A
+                     // scripted one (`MatrixRTCScriptedCall`) in the harness; nil in a preview.
+                     rtcCall: MatrixRTCCall? = nil) -> ElementCallController {
         let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: ElementCallFakeSystem(),
                                                options: options,
                                                style: style,
                                                logger: nil,
-                                               preferences: ElementCallFakePreferencesStore())
+                                               preferences: ElementCallFakePreferencesStore(),
+                                               permissions: ElementCallFakeMediaPermissions())
         controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                    room: room,
                                    connection: connection,
                                    connectedAt: connectedAt,
-                                   call: call)
+                                   call: call,
+                                   rtcCall: rtcCall)
         return controller
     }
     
@@ -253,7 +306,8 @@ public extension ElementCallController {
                                                options: ElementCallOptions(isDeveloperModeEnabled: true),
                                                style: .stock,
                                                logger: nil,
-                                               preferences: ElementCallFakePreferencesStore())
+                                               preferences: ElementCallFakePreferencesStore(),
+                                               permissions: ElementCallFakeMediaPermissions())
         controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                    room: room,
                                    connection: .joining,
@@ -274,6 +328,32 @@ public extension ElementCallController {
             controller.audioSessionDidActivate()
         } catch {
             controller.errorMessage = "Could not activate the audio session: \(error)"
+        }
+        return controller
+    }
+    
+    /// The example harness only (`permission_probe`): a real controller over the system's own
+    /// permissions, so its dialogs appear and a refusal is handled as in a real call (042). Start it
+    /// with ``startCall(_:room:)``: the gate, the system call and everything after the join are the
+    /// shipping path, and only the room, the join and the media connection are replaced by `rtcCall`
+    /// and `call`, a scripted pair that captures and sends nothing.
+    static func permissionProbe(following rtcCall: MatrixRTCCall, call: MatrixRTCMediaSession) -> ElementCallController {
+        let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
+                                               system: ElementCallFakeSystem(),
+                                               options: ElementCallOptions(isDeveloperModeEnabled: true),
+                                               style: .stock,
+                                               logger: nil,
+                                               preferences: ElementCallFakePreferencesStore())
+        controller.scriptedJoin = { [weak controller] in
+            // No CallKit here to activate the audio session, as for `fake(following:)`; by now the
+            // microphone has been answered.
+            do {
+                try CallAudioSessionConfigurator.activate()
+                controller?.audioSessionDidActivate()
+            } catch {
+                controller?.errorMessage = "Could not activate the audio session: \(error)"
+            }
+            return (rtcCall, call)
         }
         return controller
     }

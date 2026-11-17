@@ -429,7 +429,7 @@ struct HostConnectionTests {
             transport = FakeMediaSession(holdingPublish: holdingPublish)
             media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
             controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
-                                               system: system, options: .init(), style: .stock, logger: nil)
+                                               system: system, options: .init(), style: .stock, logger: nil, permissions: ElementCallFakeMediaPermissions())
             controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                        room: room, connection: connection, connectedAt: connectedAt, call: media, rtcCall: rtcCall)
         }

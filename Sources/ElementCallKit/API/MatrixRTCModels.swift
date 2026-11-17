@@ -507,6 +507,8 @@ public nonisolated enum MatrixRTCConnectionLossReason: Sendable, Hashable {
     case refused
     /// Never established within the budget from the connect request.
     case neverConnected
+    /// Our homeserver has no MSC4195 `get_token`, so no SFU token can be had. Never retried.
+    case tokenEndpointUnsupported
 }
 
 public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
@@ -534,6 +536,23 @@ public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
 /// What the call does with the reactions it receives (037 R13).
 public nonisolated enum MatrixRTCReactionsMode: Sendable, Hashable {
     case off, withoutSound, withSound
+}
+
+/// One reaction we can send: an entry of Element Call's catalogue, which is the set and the order
+/// every client's picker shows (009 R11). `name` is the interoperable part, what a peer picks a
+/// sound by; `emoji` is what it shows.
+public nonisolated struct MatrixRTCReactionKind: Identifiable, Sendable, Hashable {
+    public let name: String
+    public let emoji: String
+    
+    public var id: String {
+        name
+    }
+    
+    public init(name: String, emoji: String) {
+        self.name = name
+        self.emoji = emoji
+    }
 }
 
 /// A reaction being shown: published once its spread delay is over, and dropped four seconds after

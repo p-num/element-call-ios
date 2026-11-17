@@ -46,6 +46,10 @@ public extension EnvironmentValues {
     /// harness turns it off, because a single frame of ripples is the first one still under the
     /// speaking ring, and the still waves at least show the speaking state.
     @Entry var elementCallSoundWavesRipple = true
+    /// Whether a tile's media spinner turns. On in every shipping build; the snapshot harness turns
+    /// it off, because a still taken while it turns catches it at whatever angle the render reached,
+    /// which on a slow runner is not the angle the reference was recorded at.
+    @Entry var elementCallSpinnerTurns = true
     /// How long after the user stops scrolling the chrome a scroll hid comes back (017 R20). The
     /// default in every shipping build; the example harness lengthens it for its UI tests, which
     /// check the chrome is away after a scroll and on a slow CI runner did not get to look within

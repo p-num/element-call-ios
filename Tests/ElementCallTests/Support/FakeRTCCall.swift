@@ -27,6 +27,8 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
         var pending: [CheckedContinuation<Void, Error>] = []
         var leaveCount = 0
         var pendingLeave: CheckedContinuation<Void, Error>?
+        var reactions: [(emoji: String, name: String)] = []
+        var refusesReactions = false
     }
     
     private let state = Mutex(State())
@@ -49,16 +51,28 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     }
     
     private let initialStatus: FfiCallStatus
+    private let intent: FfiCallIntent
     let statusSubscription = FakeStatusSubscription()
     
-    init(status: FfiCallStatus = .connected(sinceMs: 0, degraded: false), holdsLeave: Bool = false) {
+    init(status: FfiCallStatus = .connected(sinceMs: 0, degraded: false), intent: FfiCallIntent = .video, holdsLeave: Bool = false) {
         self.holdsLeave = holdsLeave
         initialStatus = status
+        self.intent = intent
     }
     
     /// Every hand request made, answered or not.
     var requests: [HandRequest] {
         state.withLock { $0.requests }
+    }
+    
+    /// Every reaction sent, as `(emoji, name)`, refused ones included.
+    var reactions: [(emoji: String, name: String)] {
+        state.withLock { $0.reactions }
+    }
+    
+    /// Refuse every reaction from now on, as the core does inside its cooldown.
+    func refuseReactions() {
+        state.withLock { $0.refusesReactions = true }
     }
     
     var leaveCount: Int {
@@ -108,6 +122,10 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
         "m.call#ROOM"
     }
     
+    func callIntent() -> FfiCallIntent {
+        intent
+    }
+    
     func memberId() -> String {
         "@me:example.com:DEVICE"
     }
@@ -138,7 +156,14 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     }
     
     func sendReaction(emoji: String, name: String) async throws -> String {
-        ""
+        let refuses = state.withLock { state in
+            state.reactions.append((emoji, name))
+            return state.refusesReactions
+        }
+        if refuses {
+            throw RefusedError()
+        }
+        return "$reaction"
     }
     
     func status() -> FfiCallStatus {

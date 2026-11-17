@@ -111,17 +111,29 @@ struct ElementCallFullscreenHandBadge: View {
 /// full-screen chrome, so the two cannot drift and the stage's clearance stays one number.
 struct ElementCallFloatingControls: View {
     @Bindable var context: ElementCallScreenContext
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     
     /// How far up from the safe area it sits; the stage keeps the grid's end clear of it.
     static let edgePadding: CGFloat = 12
     static let clearance: CGFloat = ElementCallControlsView.thickness + edgePadding
     
+    private var isPickerShown: Bool {
+        context.viewState.presentedSheet == .reactions
+    }
+    
     var body: some View {
-        VStack(spacing: 0) {
+        VStack(spacing: 8) {
             Spacer()
+            // Over the stage rather than in the clearance, so the tiles do not move when a hand
+            // goes up. Not under the picker, whose scrim it would show through.
+            if context.viewState.showsRaisedHandBanner, !isPickerShown {
+                ElementCallRaisedHandBanner(context: context)
+                    .transition(reduceMotion ? .opacity : .move(edge: .bottom).combined(with: .opacity))
+            }
             ElementCallControlsView(context: context, axis: .horizontal)
                 .padding(.bottom, Self.edgePadding)
         }
+        .animation(.easeInOut(duration: 0.25), value: context.viewState.showsRaisedHandBanner)
     }
 }
 

@@ -243,6 +243,9 @@ public final class MatrixRTCMediaSession {
     /// opening the device there is a privacy abort. The camera state still changes, so our tile
     /// follows it and the harness draws its test pattern there.
     private let capturesCamera: Bool
+    /// Whether publishing the microphone starts its tap. Off for a scripted call, whose track has no
+    /// Rust object to hand frames to; the mute state is still recorded (042's `permission_probe`).
+    private let capturesMicrophone: Bool
     
     /// `audio` defaults to one of its own for a session with no call around it: the harness's and
     /// the tests'.
@@ -251,12 +254,14 @@ public final class MatrixRTCMediaSession {
          audio: CallAudio = CallAudio(),
          clock: any Clock<Duration> = ContinuousClock(),
          capturesCamera: Bool = true,
+         capturesMicrophone: Bool = true,
          reactionSpread: @escaping () -> Duration = { .milliseconds(Int.random(in: 0...500)) }) {
         self.localMemberID = localMemberID
         self.audio = audio
         self.mediaSession = mediaSession
         self.clock = clock
         self.capturesCamera = capturesCamera
+        self.capturesMicrophone = capturesMicrophone
         self.reactionSpread = reactionSpread
         joinLeaveSoundPolicy = JoinLeaveSoundPolicy(participantCap: Self.defaultParticipantCapForJoinLeaveSounds)
         elapsed = stopwatch(clock)
@@ -330,7 +335,8 @@ public final class MatrixRTCMediaSession {
                                                                                                           numChannels: UInt32(AudioFormat.channelCount)),
                                                                               video: nil,
                                                                               simulcast: false,
-                                                                              muted: muted))
+                                                                              muted: muted,
+                                                                              videoCodec: .auto))
         } catch {
             throw MatrixRTCError.media("Failed to publish the microphone: \(error)")
         }
@@ -339,7 +345,9 @@ public final class MatrixRTCMediaSession {
         // Controls remain live while publication is in flight. Close the capture gate before
         // starting it and reconcile the latest choice, rather than restoring the join-time value.
         microphone.setMuted(isMicrophoneMuted)
-        microphone.start(track: track)
+        if capturesMicrophone {
+            microphone.start(track: track)
+        }
         await setMicrophoneMuted(isMicrophoneMuted)
         MatrixRTCLog.info("Publishing microphone as \(localMemberID)")
     }
@@ -427,7 +435,7 @@ public final class MatrixRTCMediaSession {
             // A single simulcast layer lets dynacast pause the only encoding, leaving no video.
             let options = FfiPublishOptions(kind: .camera, audio: nil,
                                             video: FfiVideoSourceConfig(width: UInt32(size.width), height: UInt32(size.height)),
-                                            simulcast: true, muted: true)
+                                            simulcast: true, muted: true, videoCodec: .auto)
             publication = (UUID(), Task { [mediaSession] in try await mediaSession.publish(options: options) })
             cameraPublication = publication
         }
@@ -569,7 +577,8 @@ public final class MatrixRTCMediaSession {
                                                                                   video: FfiVideoSourceConfig(width: UInt32(ScreenShareCapturer.maxLongEdge),
                                                                                                               height: UInt32(ScreenShareCapturer.maxLongEdge * 9 / 16)),
                                                                                   simulcast: true,
-                                                                                  muted: false))
+                                                                                  muted: false,
+                                                                                  videoCodec: .auto))
             } catch {
                 throw MatrixRTCError.media("Failed to publish the screen share: \(error)")
             }

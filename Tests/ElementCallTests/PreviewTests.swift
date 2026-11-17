@@ -158,11 +158,13 @@ struct PreviewTests {
                                  testName: String = #function,
                                  traits: UITraitCollection = .init(),
                                  preferences: SnapshotPreferences) -> String? {
-        // The flat fallback rather than glass, and still sound waves rather than a frame of ripples:
-        // see `elementCallGlassEnabled` and `elementCallSoundWavesRipple`.
+        // The flat fallback rather than glass, still sound waves rather than a frame of ripples, and
+        // a still spinner: see `elementCallGlassEnabled`, `elementCallSoundWavesRipple` and
+        // `elementCallSpinnerTurns`.
         let view = AnyView(view
             .environment(\.elementCallGlassEnabled, false)
-            .environment(\.elementCallSoundWavesRipple, false))
+            .environment(\.elementCallSoundWavesRipple, false)
+            .environment(\.elementCallSpinnerTurns, false))
         let matchingView = isScreen ? AnyView(view) : AnyView(view
             .frame(width: device.size?.width)
             .fixedSize(horizontal: false, vertical: true))

@@ -1,4 +1,4 @@
-// Generated using Sourcery 2.3.0 — https://github.com/krzysztofzablocki/Sourcery
+// Generated using Sourcery 2.4.1 — https://github.com/krzysztofzablocki/Sourcery
 // DO NOT EDIT
 
 // swiftlint:disable all
@@ -39,9 +39,30 @@ extension PreviewTests {
         }
     }
 
+    @Test("ElementCallMoreSheet")
+    func elementCallMoreSheet() async throws {
+        for (index, preview) in ElementCallMoreSheet_Previews._allPreviews.enumerated() {
+            try await assertSnapshots(matching: preview, step: index)
+        }
+    }
+
     @Test("ElementCallPreferencesSheet")
     func elementCallPreferencesSheet() async throws {
         for (index, preview) in ElementCallPreferencesSheet_Previews._allPreviews.enumerated() {
+            try await assertSnapshots(matching: preview, step: index)
+        }
+    }
+
+    @Test("ElementCallRaisedHandBanner")
+    func elementCallRaisedHandBanner() async throws {
+        for (index, preview) in ElementCallRaisedHandBanner_Previews._allPreviews.enumerated() {
+            try await assertSnapshots(matching: preview, step: index)
+        }
+    }
+
+    @Test("ElementCallReactionPicker")
+    func elementCallReactionPicker() async throws {
+        for (index, preview) in ElementCallReactionPicker_Previews._allPreviews.enumerated() {
             try await assertSnapshots(matching: preview, step: index)
         }
     }

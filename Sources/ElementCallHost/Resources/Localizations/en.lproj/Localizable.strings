@@ -35,6 +35,8 @@
 "element_call_a11y_return_to_call_interrupted_ios" = "Return to call, %1$@";
 "element_call_a11y_return_to_call_ios" = "Return to call";
 "element_call_a11y_selected" = "Selected";
+"element_call_a11y_send_reaction" = "Send a reaction";
+"element_call_a11y_send_reaction_emoji" = "Send reaction %1$@";
 "element_call_a11y_sharing_screen" = "Sharing their screen";
 "element_call_a11y_speaking" = "Speaking";
 "element_call_a11y_start_screen_share" = "Share screen";
@@ -45,7 +47,9 @@
 "element_call_a11y_unavailable" = "Unavailable";
 "element_call_a11y_unmute_microphone" = "Unmute microphone";
 "element_call_action_back" = "Back";
+"element_call_action_cancel" = "Cancel";
 "element_call_action_close" = "Close";
+"element_call_action_open_settings" = "Open settings";
 "element_call_action_return_ios" = "Return";
 "element_call_action_stop" = "Stop";
 "element_call_audio_device_bluetooth" = "Bluetooth";
@@ -60,6 +64,7 @@
 "element_call_call_in_progress" = "Call in progress";
 "element_call_calling" = "Calling…";
 "element_call_connecting" = "Connecting…";
+"element_call_emoji_reactions" = "Emoji reactions";
 "element_call_error" = "Error";
 "element_call_failure_connection_failed_title" = "Couldn’t connect";
 "element_call_failure_connection_lost" = "Your connection to the call couldn’t be restored.";
@@ -71,6 +76,7 @@
 "element_call_failure_join_timed_out" = "Your server didn’t respond in time.";
 "element_call_hand_lower_failed" = "Your hand could not be lowered.";
 "element_call_hand_raise_failed" = "Your hand could not be raised.";
+"element_call_hand_raised_banner" = "Your hand is raised";
 "element_call_hero_position" = "%1$d of %2$d";
 "element_call_interruption_others_media" = "Some participants’ audio or video isn’t reaching you";
 "element_call_interruption_own_media" = "Reconnecting your audio and video";
@@ -79,7 +85,13 @@
 "element_call_interruptions" = "Service interruptions";
 "element_call_interruptions_resolved" = "Connection restored";
 "element_call_joining" = "Joining…";
+"element_call_lower_hand" = "Lower hand";
+"element_call_more_title" = "More options";
 "element_call_ok" = "OK";
+"element_call_permission_camera_description" = "Allow access to the camera in settings to turn it on.";
+"element_call_permission_camera_title" = "Camera not allowed";
+"element_call_permission_microphone_description" = "Allow access to the microphone in settings, then start the call again.";
+"element_call_permission_microphone_title" = "Microphone needed";
 "element_call_preferences_about" = "About";
 "element_call_preferences_core_version" = "matrix-rust-rtc %1$@";
 "element_call_preferences_developer_options" = "Developer options";
@@ -95,7 +107,12 @@
 "element_call_preferences_tile_stats_description" = "Show each tile's media statistics.";
 "element_call_preferences_title" = "Preferences";
 "element_call_preferences_version" = "Version %1$@";
+"element_call_raise_hand" = "Raise hand";
+"element_call_reactions_title" = "Reactions";
 "element_call_ring_not_sent" = "The other person could not be called";
+"element_call_screen_share_failed" = "Could not start screen sharing";
+"element_call_screen_share_start" = "Share screen";
+"element_call_screen_share_stop" = "Stop sharing screen";
 "element_call_shared_screen_name" = "%1$@’s screen";
 "element_call_sharing_your_screen" = "You’re sharing your screen";
 "element_call_you" = "You";

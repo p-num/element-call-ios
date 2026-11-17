@@ -14,7 +14,9 @@ import Synchronization
 ///
 /// What it hands out is a genuine ``MatrixRTCCall``, so everything above the core runs as it ships:
 /// the controller follows the status, the screen draws it, and the call's own audio plays the
-/// ringback and the end sounds. Only the membership is inert: no roster, no hands, no reactions.
+/// ringback and the end sounds. Only the membership is inert: no roster, and a hand request or a
+/// reaction we send goes only to ``onHandRequested`` or ``onReactionSent``, which is how a harness
+/// plays it back as the room would.
 public final class MatrixRTCScriptedCall {
     public let call: MatrixRTCCall
     private let core: ScriptedCore
@@ -23,6 +25,19 @@ public final class MatrixRTCScriptedCall {
         core = ScriptedCore(roomID: roomID, status: status.ffi)
         call = MatrixRTCCall(rtcCall: core)
         call.start()
+    }
+    
+    /// Called with each reaction we send, as `(emoji, name)`.
+    public var onReactionSent: (@Sendable (String, String) -> Void)? {
+        get { core.onReactionSent.withLock { $0.action } }
+        set { core.onReactionSent.withLock { $0 = ReactionSentAction(action: newValue) } }
+    }
+    
+    /// Called with each hand request, true to raise. The membership holds no hand of its own: our
+    /// tile shows it, so the harness pushes it to the scripted session.
+    public var onHandRequested: (@Sendable (Bool) -> Void)? {
+        get { core.onHandRequested.withLock { $0.action } }
+        set { core.onHandRequested.withLock { $0 = HandRequestAction(action: newValue) } }
     }
     
     /// What the core would report next. A hang-up reports `.ended(.left)` by itself, as the core does.
@@ -87,9 +102,21 @@ private nonisolated extension Date {
     }
 }
 
-/// The membership side of the scripted call: the status as pushed, and nothing else.
+/// Boxed, because a function value stored directly in a `Mutex` is reabstracted on every access.
+private nonisolated struct ReactionSentAction {
+    var action: (@Sendable (String, String) -> Void)?
+}
+
+private nonisolated struct HandRequestAction {
+    var action: (@Sendable (Bool) -> Void)?
+}
+
+/// The membership side of the scripted call: the status as pushed, and our hand requests and
+/// reactions handed to ``MatrixRTCScriptedCall/onHandRequested`` and ``MatrixRTCScriptedCall/onReactionSent``.
 private final nonisolated class ScriptedCore: RtcCallProtocol, Sendable {
     let subscription = ScriptedStatusSubscription()
+    let onReactionSent = Mutex(ReactionSentAction())
+    let onHandRequested = Mutex(HandRequestAction())
     private let roomID: String
     private let initialStatus: FfiCallStatus
     
@@ -118,6 +145,10 @@ private final nonisolated class ScriptedCore: RtcCallProtocol, Sendable {
         "m.call#ROOM"
     }
     
+    func callIntent() -> FfiCallIntent {
+        .video
+    }
+    
     func memberId() -> String {
         "@alice:example.com:DEVICE"
     }
@@ -134,16 +165,21 @@ private final nonisolated class ScriptedCore: RtcCallProtocol, Sendable {
         nil
     }
     
-    func raiseHand() async throws { }
+    func raiseHand() async throws {
+        onHandRequested.withLock { $0.action }?(true)
+    }
     
-    func lowerHand() async throws { }
+    func lowerHand() async throws {
+        onHandRequested.withLock { $0.action }?(false)
+    }
     
     func raisedHands() async -> [FfiRaisedHand] {
         []
     }
     
     func sendReaction(emoji: String, name: String) async throws -> String {
-        ""
+        onReactionSent.withLock { $0.action }?(emoji, name)
+        return ""
     }
     
     func subscribeMembershipSnapshots() async -> MembershipSnapshotSubscription {

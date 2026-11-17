@@ -85,7 +85,7 @@ struct ElementCallExampleCatalogue: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(fixture.title)
                     .font(.body)
-                Text(fixture.detail)
+                Text(fixture.catalogueDetail)
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }

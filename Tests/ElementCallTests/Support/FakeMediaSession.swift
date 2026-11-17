@@ -186,6 +186,10 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
         []
     }
     
+    func unverifiedParticipants() -> [String] {
+        []
+    }
+    
     func receiveStats(memberId: String, kind: FfiStreamKind) async -> FfiReceiveStats? {
         nil
     }

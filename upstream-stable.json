@@ -1,21 +1,25 @@
 {
   "upstream": {
     "repository": "element-hq/element-call-ios",
-    "tag": "0.1.0-rc.11",
-    "commit": "d77b4ee326582083cabe53ffbd872a751c3cb989"
+    "tag": "0.1.0-rc.16",
+    "commit": "d76e399cb533f3d9198a2d729061ff3e3dcce071"
   },
-  "consumer_release": "element-x-ios release/26.10.8",
+  "consumer_release": "Uncommitted upstream-sync candidate; not ready for app adoption",
   "published_pins_retained": {
-    "matrix_sdk": "26.09.22-letro.1..<100.0.0 from git.postnumber.com/letro/matrix-rust-components-swift",
-    "matrix_rust_rtc": "0.5.0-rc.4-letro.3"
+    "matrix_rust_rtc": "0.5.0-rc.9-letro.1",
+    "revision": "b2f060fe609b4fd95ae2208ca7ac0e97e2751169"
   },
+  "required_upstream_rtc": {
+    "tag": "0.5.0-rc.11",
+    "commit": "bdff10ec5e235c274f571d0ddde30bf8215872ca"
+  },
+  "matrix_sdk": "Host-owned; this package has no SDK dependency. Upstream reference example uses 26.10.30-2.",
   "validation": {
-    "format_and_lint": "passed",
-    "swift_syntax": "148 source/test files parsed",
-    "generated_rtc_interface": "compiled for arm64 iOS Simulator",
-    "kit_host_ui_interfaces": "compiled for arm64 iOS Simulator with actor isolation enabled",
-    "focused_test_interfaces": "seven focused test/support files typechecked with the real Swift Testing macros",
-    "runtime_and_snapshots": "pending matching media-enabled RTC artifact"
+    "format_and_lint": "swiftformat --lint: 0/184 files require formatting; swiftlint: passed with warnings and no errors",
+    "swift_syntax": "185 Swift source, test and example files parsed with swiftc -frontend -parse",
+    "runtime_and_snapshots": "Not run; awaiting compatible published Letro RTC artifact",
+    "diff_check": "Passed with repository-required indented blank lines allowed",
+    "tests": "Not run; added startup-camera permission supersession coverage for the merge"
   },
-  "release_gate": "Publish the merged Letro RTC engine, update its pin here, and run linked package tests/snapshots before a host adopts this source."
+  "release_gate": "Use the Letro RTC artifact containing the required rc.11 history, resolve Package.swift and Package.resolved together, then run linked local package tests/snapshots and host integration checks before app adoption."
 }

@@ -50,7 +50,8 @@ struct InterruptionHoldTests {
                                                system: ElementCallFakeSystem(),
                                                options: ElementCallOptions(),
                                                style: .stock,
-                                               logger: nil)
+                                               logger: nil,
+                                               permissions: ElementCallFakeMediaPermissions())
         let clock = MatrixRTCManualClock()
         controller.clock = clock
         controller.setPreviewState(callData: ElementCallData(isAudioCall: false, isStartingCall: true),

@@ -77,7 +77,7 @@ struct DirectCallLifecycleTests {
     
     private func makeCall(isDirect: Bool = true) -> (ElementCallController, MatrixRTCCall, FakeRTCCall) {
         let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(userID: "@me:example.org"),
-                                               system: ElementCallFakeSystem(), options: .init(), style: .stock, logger: nil)
+                                               system: ElementCallFakeSystem(), options: .init(), style: .stock, logger: nil, permissions: ElementCallFakeMediaPermissions())
         let core = FakeRTCCall()
         let call = MatrixRTCCall(rtcCall: core)
         controller.setPreviewState(callData: .init(isAudioCall: true, isStartingCall: true),

@@ -14,9 +14,12 @@ import SwiftUI
 /// that no longer existed.
 ///
 /// Closing is the hang-up the controller holds the end for, so the host dismisses as it always has.
+/// A refused microphone adds Open settings above it, as the primary action, and Close drops to a
+/// plain text button (042 R7).
 struct ElementCallFailureView: View {
     @Environment(\.elementCallStyle) private var style
     let failure: ElementCallFailure
+    var onOpenSettings: (() -> Void)?
     let onClose: () -> Void
     
     var body: some View {
@@ -39,20 +42,37 @@ struct ElementCallFailureView: View {
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            Button(action: onClose) {
-                Text(L10n.actionClose)
-                    .font(style.theme.bodyLGSemibold)
-                    .foregroundStyle(style.theme.iconOnSolidPrimary)
-                    .frame(maxWidth: .infinity, minHeight: 48)
-                    .background(style.theme.bgActionPrimaryRest, in: Capsule())
+            if let onOpenSettings {
+                primaryButton(L10n.actionOpenSettings, action: onOpenSettings)
+                    .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.failureOpenSettings)
+                Button(action: onClose) {
+                    Text(L10n.actionClose)
+                        .font(style.theme.bodyLGSemibold)
+                        .foregroundStyle(style.theme.textPrimary)
+                        .frame(maxWidth: .infinity, minHeight: 48)
+                }
+                .buttonStyle(.plain)
+                .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.failureClose)
+            } else {
+                primaryButton(L10n.actionClose, action: onClose)
+                    .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.failureClose)
             }
-            .buttonStyle(.plain)
-            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.failureClose)
         }
         .padding(24)
         .frame(maxWidth: 480)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(style.theme.bgCanvasDefault.ignoresSafeArea())
+    }
+    
+    private func primaryButton(_ title: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(style.theme.bodyLGSemibold)
+                .foregroundStyle(style.theme.iconOnSolidPrimary)
+                .frame(maxWidth: .infinity, minHeight: 48)
+                .background(style.theme.bgActionPrimaryRest, in: Capsule())
+        }
+        .buttonStyle(.plain)
     }
 }
 
@@ -60,7 +80,9 @@ struct ElementCallFailureView: View {
 
 struct ElementCallFailureView_Previews: PreviewProvider, TestablePreview {
     static func screen(_ failure: ElementCallFailure) -> some View {
-        ElementCallFailureView(failure: failure) { }
+        ElementCallFailureView(failure: failure,
+                               onOpenSettings: failure == .microphoneRefused ? { } : nil,
+                               onClose: { })
             .environment(\.colorScheme, .dark)
     }
     
@@ -71,5 +93,7 @@ struct ElementCallFailureView_Previews: PreviewProvider, TestablePreview {
             .previewDisplayName("Join refused")
         screen(.other("Homeserver offers no LiveKit transport"))
             .previewDisplayName("Other")
+        screen(.microphoneRefused)
+            .previewDisplayName("Microphone refused")
     }
 }

@@ -50,7 +50,8 @@ struct ReactionsPreferenceTests {
         let store = ElementCallFakePreferencesStore(soundEffectsVolume: 0.2)
         let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: ElementCallFakeSystem(),
-                                               preferences: store)
+                                               preferences: store,
+                                               permissions: ElementCallFakeMediaPermissions())
         #expect(controller.soundEffectsVolume == 0.2)
         controller.setSoundEffectsVolume(0.7)
         #expect(store.soundEffectsVolume == 0.7)
@@ -61,7 +62,8 @@ struct ReactionsPreferenceTests {
         let store = ElementCallFakePreferencesStore(reactions: .off)
         let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: ElementCallFakeSystem(),
-                                               preferences: store)
+                                               preferences: store,
+                                               permissions: ElementCallFakeMediaPermissions())
         #expect(controller.reactionsPreference == .off)
         controller.setReactionsPreference(.withSound)
         #expect(controller.reactionsPreference == .withSound)
@@ -78,7 +80,8 @@ struct ReactionsPreferenceTests {
                                             capturesCamera: false)
         let controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: ElementCallFakeSystem(),
-                                               preferences: ElementCallFakePreferencesStore(reactions: .withoutSound))
+                                               preferences: ElementCallFakePreferencesStore(reactions: .withoutSound),
+                                               permissions: ElementCallFakeMediaPermissions())
         controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
                                    room: ElementCallFakeRoom(),
                                    connection: .connected,

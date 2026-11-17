@@ -5,8 +5,9 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
+// `@testable` for the controller's clock.
 import Combine
-import ElementCallHost
+@testable import ElementCallHost
 import ElementCallKit
 import Foundation
 import Testing
@@ -15,8 +16,9 @@ import Testing
 /// tests get from `ElementCallFakeMatrixBackend`, and the one place a hang-up can land while the
 /// join is still waiting for its room.
 ///
-/// Every test hangs up what it started and waits for the join to unwind. A call left joining fails
-/// when the core stops waiting for its room, 30 seconds on, in whichever test is running by then.
+/// Every test hangs up what it started and waits for the join to unwind. The wait for the room is
+/// timed on a clock that never moves, so however slow the runner, the hang-up lands before the
+/// 30 seconds after which the join would give up on the room and fail.
 @Suite("Hanging up while joining")
 @MainActor
 struct HangUpWhileJoiningTests {
@@ -96,7 +98,9 @@ struct HangUpWhileJoiningTests {
                                                    system: system,
                                                    options: ElementCallOptions(),
                                                    style: .stock,
-                                                   logger: logger)
+                                                   logger: logger,
+                                                   permissions: ElementCallFakeMediaPermissions())
+            controller.clock = MatrixRTCManualClock()
             self.system = system
             self.logger = logger
             self.controller = controller

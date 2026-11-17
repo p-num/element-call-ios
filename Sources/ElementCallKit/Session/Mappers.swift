@@ -100,12 +100,22 @@ nonisolated extension MatrixRTCEndReason {
     }
 }
 
+nonisolated extension MatrixRTCCallIntent {
+    init(_ intent: FfiCallIntent) {
+        switch intent {
+        case .audio: self = .audio
+        case .video: self = .video
+        }
+    }
+}
+
 nonisolated extension MatrixRTCConnectionLossReason {
     init(_ reason: FfiConnectionLossReason) {
         switch reason {
         case .budget: self = .budget
         case .refused: self = .refused
         case .neverConnected: self = .neverConnected
+        case .tokenEndpointUnsupported: self = .tokenEndpointUnsupported
         }
     }
     
@@ -114,6 +124,7 @@ nonisolated extension MatrixRTCConnectionLossReason {
         case .budget: .budget
         case .refused: .refused
         case .neverConnected: .neverConnected
+        case .tokenEndpointUnsupported: .tokenEndpointUnsupported
         }
     }
 }
@@ -341,4 +352,10 @@ nonisolated extension MatrixRTCCallEvent {
             self = .ownMediaConnectionDegraded(degraded)
         }
     }
+}
+
+public nonisolated extension MatrixRTCReactionKind {
+    /// Read from the core rather than copied, so a reaction the core adds reaches the picker with no
+    /// edit here, in the place web shows it.
+    static let catalogue: [MatrixRTCReactionKind] = reactionCatalog().map { MatrixRTCReactionKind(name: $0.name, emoji: $0.emoji) }
 }

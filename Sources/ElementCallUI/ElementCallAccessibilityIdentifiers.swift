@@ -32,6 +32,21 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     /// buttons answering to one identifier.
     public static let exitFullscreen = "\(prefix).exitFullscreen"
     public static let more = "\(prefix).more"
+    /// What opens the reaction picker: the More sheet's row, or the bar's button when reactions are
+    /// the call's only extra action (009 R16).
+    public static let reactions = "\(prefix).reactions"
+    /// The control bar's `…`, and the sheet it opens of the hand, reactions and screen share. Set by hand:
+    /// `control(for: .overflow)` is the top bar's `more`, a different menu.
+    public static let controlsMore = "\(prefix).controlsMore"
+    public static let moreSheet = "\(prefix).moreSheet"
+    /// The raised-hand banner's Cancel, which lowers our hand.
+    public static let lowerHand = "\(prefix).lowerHand"
+    /// The picker, and each reaction in it by its catalogue name, which is the same on every client.
+    public static let reactionSheet = "\(prefix).reactionSheet"
+    public static func reaction(_ kind: MatrixRTCReactionKind) -> String {
+        "\(prefix).reaction.\(kind.name)"
+    }
+    
     /// The overflow menu's item, and the sheet it opens with its controls (037 R12, R13, R16). Set by
     /// hand, like the top bar's buttons.
     public static let preferences = "\(prefix).preferences"
@@ -62,6 +77,8 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     public static let interruptionsList = "\(prefix).interruptionsList"
     /// The failure screen's close button (034 R27).
     public static let failureClose = "\(prefix).failureClose"
+    /// The failure screen's Open settings, for a refused microphone (042 R7).
+    public static let failureOpenSettings = "\(prefix).failureOpenSettings"
     
     /// A tile, identified by the member on it **and the stream it draws**.
     ///
@@ -103,6 +120,7 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         case .keyOff: "\(prefix).keyOff"
         case .switchCamera: "\(prefix).switchCamera"
         case .raisedHand: "\(prefix).raisedHand"
+        case .reaction: reactions
         case .userProfile: "\(prefix).userProfile"
         case .voiceCall: "\(prefix).voiceCall"
         }

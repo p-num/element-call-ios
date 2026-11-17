@@ -183,10 +183,58 @@ final nonisolated class SDKMatrixBackend: ElementCallMatrixBackendProtocol {
         }
     }
     
-    /// The SDK's bindings cannot make the request, so a transport that needs it is not joined; one
-    /// with a `livekit_service_url` takes its token from that service instead and never asks.
+    /// MSC4195's `get_token`, under the unstable path homeservers serve. Needed by every MSC join and
+    /// by a room-state transport naming an SFU `url` alone; a transport with a `livekit_service_url`
+    /// takes its token from that service and never asks.
+    ///
+    /// WORKAROUND: the SDK's bindings have no call for it yet (matrix-org/matrix-rust-sdk#7428), so
+    /// this is a plain request with the session's access token, as the slot read in
+    /// `SDKRoomSlots.swift` is. Replace it with the bindings' call once that lands.
     func liveKitToken(for request: ElementCallLiveKitTokenRequest) async throws(ElementCallMatrixBackendError) -> String {
-        throw ElementCallMatrixBackendError(errorCode: "M_UNRECOGNIZED", statusCode: 404, reason: "The SDK bindings cannot request a LiveKit token from the homeserver")
+        logger?.log(.info, "backend: liveKitToken(\(request.url))")
+        let session: Session
+        do {
+            session = try client.session()
+        } catch {
+            throw SDKMappings.backendError(error)
+        }
+        guard let url = URL(string: session.homeserverUrl)?.appending(path: "_matrix/client/unstable/io.element.msc4195/rtc/livekit/get_token") else {
+            throw ElementCallMatrixBackendError(isPermanent: true, reason: "no homeserver URL for get_token")
+        }
+        var body: [String: Any] = ["url": request.url, "room_id": request.roomID, "slot_id": request.slotID, "member_id": request.memberID]
+        if let serverName = request.serverName {
+            body["server_name"] = serverName
+        }
+        var httpRequest = URLRequest(url: url)
+        httpRequest.httpMethod = "POST"
+        httpRequest.setValue("Bearer \(session.accessToken)", forHTTPHeaderField: "Authorization")
+        httpRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let data: Data
+        let status: Int
+        do {
+            httpRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+            let (answer, response) = try await URLSession.shared.data(for: httpRequest)
+            data = answer
+            status = (response as? HTTPURLResponse)?.statusCode ?? 0
+        } catch {
+            // No answer at all: the network, retried by the core.
+            logger?.log(.warning, "backend: liveKitToken failed: \(error)")
+            throw ElementCallMatrixBackendError(reason: "get_token: \(error.localizedDescription)")
+        }
+        let json = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        if status == 200, let jwt = json?["jwt"] as? String {
+            return jwt
+        }
+        let errorCode = json?["errcode"] as? String
+        let retryAfter = (json?["retry_after_ms"] as? NSNumber).map { Duration.milliseconds($0.int64Value) }
+        // A refusal is final, except a rate limit; a server error is worth another try.
+        let isPermanent = (400..<500).contains(status) && status != 429
+        logger?.log(.warning, "backend: liveKitToken answered \(status) \(errorCode ?? "")")
+        throw ElementCallMatrixBackendError(errorCode: errorCode,
+                                            statusCode: status,
+                                            retryAfter: retryAfter,
+                                            isPermanent: isPermanent,
+                                            reason: (json?["error"] as? String) ?? "get_token answered \(status)")
     }
     
     /// The SDK falls back to the well-known when the homeserver lacks the MSC4143 endpoint; neither

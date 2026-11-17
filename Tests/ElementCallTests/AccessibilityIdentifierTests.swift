@@ -41,6 +41,18 @@ nonisolated struct AccessibilityIdentifierTests {
         #expect(ElementCallAccessibilityIdentifiers.preferencesTileStats == "elementCall.preferences.tileStats")
         #expect(ElementCallAccessibilityIdentifiers.preferencesSoundEffectsVolume == "elementCall.preferences.soundEffectsVolume")
         #expect(ElementCallAccessibilityIdentifiers.preferencesVersion == "elementCall.preferences.version")
+        #expect(ElementCallAccessibilityIdentifiers.reactions == "elementCall.reactions")
+        #expect(ElementCallAccessibilityIdentifiers.controlsMore == "elementCall.controlsMore")
+        #expect(ElementCallAccessibilityIdentifiers.lowerHand == "elementCall.lowerHand")
+        #expect(ElementCallAccessibilityIdentifiers.moreSheet == "elementCall.moreSheet")
+        #expect(ElementCallAccessibilityIdentifiers.reactionSheet == "elementCall.reactionSheet")
+        #expect(ElementCallAccessibilityIdentifiers.reaction(MatrixRTCReactionKind(name: "thumbsup", emoji: "👍")) == "elementCall.reaction.thumbsup")
+    }
+    
+    /// The bar's `…` is not the top bar's: the derived identifier would have made them one.
+    @Test("The two overflow controls answer to different identifiers")
+    func overflowControlsAreDistinct() {
+        #expect(ElementCallAccessibilityIdentifiers.controlsMore != ElementCallAccessibilityIdentifiers.control(for: .overflow))
     }
     
     /// The camera spelling is the one an external rig pins, and it has not moved. A share is a

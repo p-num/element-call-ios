@@ -169,6 +169,8 @@ public nonisolated enum ElementCallIcon: Sendable, CaseIterable {
     case headphones
     case bluetooth
     case raisedHand
+    /// The control bar's way into the reaction picker, and its row in the More sheet (009 R16).
+    case reaction
     case userProfile
     case overflow
     /// The overflow menu's way into the Preferences sheet (037 R12).

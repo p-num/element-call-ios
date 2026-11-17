@@ -283,7 +283,8 @@ struct CallStatusTests {
                                                system: system,
                                                options: ElementCallOptions(),
                                                style: .stock,
-                                               logger: nil)
+                                               logger: nil,
+                                               permissions: ElementCallFakeMediaPermissions())
         let rtcCall = FakeRTCCall(status: status)
         let silence = [Float](repeating: 0, count: 48000)
         let audio = CallAudio(soundEffects: CallSoundEffectRenderer(join: [], leave: [], raiseHand: [], declined: silence, timeout: silence))

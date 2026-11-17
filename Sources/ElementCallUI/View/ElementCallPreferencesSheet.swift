@@ -20,6 +20,9 @@ import SwiftUI
 /// with no number to change: the page reports its height and the sheet's one detent follows.
 struct ElementCallPreferencesSheet: View {
     @Bindable var context: ElementCallScreenContext
+    /// Injected so the previews can pin them: the real values move with every release and core bump.
+    var version = ElementCallVersion.current
+    var coreVersion = ElementCallVersion.core
     
     @Environment(\.elementCallStyle) private var style
     @State private var height: CGFloat = 300
@@ -75,7 +78,7 @@ struct ElementCallPreferencesSheet: View {
                 .accessibilityAddTraits(.isHeader)
             HStack {
                 Spacer()
-                Button { context.send(viewAction: .dismissPreferences) } label: { style.icons.icon(.close) }
+                Button { context.send(viewAction: .dismissSheet) } label: { style.icons.icon(.close) }
                     .buttonStyle(ElementCallRoundButtonStyle())
                     .accessibilityLabel(L10n.actionClose)
                     .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.preferencesClose)
@@ -220,8 +223,7 @@ struct ElementCallPreferencesSheet_Previews: PreviewProvider, TestablePreview {
         var state = ElementCallPreviewFixtures.connected(tiles: ElementCallPreviewFixtures.group)
         state.isDeveloperModeEnabled = isDeveloperModeEnabled
         state.reactionsPreference = .withoutSound
-        // Release versions change independently of the preview's layout.
-        return ElementCallPreferencesSheet(context: .preview(state: state), version: "0.1.0-rc.14", coreVersion: "0.5.0-rc.9")
+        return ElementCallPreferencesSheet(context: .preview(state: state), version: "1.2.3", coreVersion: "4.5.6")
             // The whole frame, so the image is the sheet on the call's canvas rather than a dark
             // band between two white ones.
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
