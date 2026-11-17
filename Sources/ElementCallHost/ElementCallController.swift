@@ -1499,6 +1499,8 @@ public final class ElementCallController {
         isEndingCall = false
         isTeardownPending = false
         self.callData = callData
+        // Tests may join from here: freeze the room's kind just as `startCall` does.
+        joiningIsDirect = room.isDirect
         self.joiningFormat = joiningFormat
         self.room = room
         self.connection = connection
