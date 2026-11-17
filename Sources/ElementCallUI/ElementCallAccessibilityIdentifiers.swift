@@ -31,12 +31,14 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     /// collapse glyph, and `control(for:)` maps that to `minimize`, which would leave two different
     /// buttons answering to one identifier.
     public static let exitFullscreen = "\(prefix).exitFullscreen"
-    public static let more = "\(prefix).more"
+    /// The top bar's settings menu (043 R1). It was `more` while it drew the overflow glyph, which
+    /// now reads as the control bar's More.
+    public static let settings = "\(prefix).settings"
     /// What opens the reaction picker: the More sheet's row, or the bar's button when reactions are
     /// the call's only extra action (009 R16).
     public static let reactions = "\(prefix).reactions"
-    /// The control bar's `…`, and the sheet it opens of the hand, reactions and screen share. Set by hand:
-    /// `control(for: .overflow)` is the top bar's `more`, a different menu.
+    /// The control bar's `…`, and the sheet it opens of the hand, reactions and screen share. The one
+    /// control drawing the overflow glyph since the top bar's menu became `settings`.
     public static let controlsMore = "\(prefix).controlsMore"
     public static let moreSheet = "\(prefix).moreSheet"
     /// The raised-hand banner's Cancel, which lowers our hand.
@@ -47,15 +49,29 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         "\(prefix).reaction.\(kind.name)"
     }
     
-    /// The overflow menu's item, and the sheet it opens with its controls (037 R12, R13, R16). Set by
-    /// hand, like the top bar's buttons.
+    /// The settings menu's item, and the sheet it opens with its controls (037 R12, 043 R6, R9). Set
+    /// by hand, like the top bar's buttons.
     public static let preferences = "\(prefix).preferences"
     public static let preferencesSheet = "\(prefix).preferencesSheet"
     public static let preferencesClose = "\(prefix).preferences.close"
-    public static let preferencesReactions = "\(prefix).preferences.reactions"
-    public static let preferencesTileStats = "\(prefix).preferences.tileStats"
+    public static let preferencesShowReactions = "\(prefix).preferences.showReactions"
+    public static let preferencesPlayReactionSounds = "\(prefix).preferences.playReactionSounds"
     public static let preferencesSoundEffectsVolume = "\(prefix).preferences.soundEffectsVolume"
     public static let preferencesVersion = "\(prefix).preferences.version"
+    /// The settings menu's developer item, and its sheet's controls (043 R3, R10, R11, R15).
+    public static let developerOptions = "\(prefix).developerOptions"
+    public static let developerOptionsSheet = "\(prefix).developerOptionsSheet"
+    public static let developerOptionsClose = "\(prefix).developerOptions.close"
+    public static let developerOptionsTileStats = "\(prefix).developerOptions.tileStats"
+    /// One row per choice, by its stored name, so a test or rig picks a format or a codec by name.
+    public static func developerOptionsMembershipFormat(_ format: MatrixRTCMembershipFormat) -> String {
+        "\(prefix).developerOptions.membershipFormat.\(format.rawValue)"
+    }
+    
+    public static func developerOptionsVideoCodec(_ codec: MatrixRTCVideoCodec) -> String {
+        "\(prefix).developerOptions.videoCodec.\(codec.rawValue)"
+    }
+    
     /// The hero stack's "1 of 3" pill on the spotlight. Set by hand on the view, like the top bar's
     /// buttons: it does not go through `control(for:)`. The dots under the spotlight have none on
     /// purpose: they are hidden from accessibility, so an identifier there would be a constant that
@@ -79,6 +95,8 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
     public static let failureClose = "\(prefix).failureClose"
     /// The failure screen's Open settings, for a refused microphone (042 R7).
     public static let failureOpenSettings = "\(prefix).failureOpenSettings"
+    /// The failure screen's Use Room state, for an MSC join that failed (043 R18a).
+    public static let failureUseRoomState = "\(prefix).failureUseRoomState"
     
     /// A tile, identified by the member on it **and the stream it draws**.
     ///
@@ -110,11 +128,14 @@ public nonisolated enum ElementCallAccessibilityIdentifiers {
         case .volumeOn, .volumeOff, .headphones, .bluetooth: audioOutput
         case .shareScreen: screenShare
         case .collapse: minimize
-        case .overflow: more
+        case .overflow: controlsMore
+        case .settings: settings
         case .preferences: preferences
+        case .developerOptions: developerOptions
         case .info: interruptions
         case .chevronRight: "\(prefix).chevronRight"
         case .close: "\(prefix).close"
+        case .check: "\(prefix).check"
         case .error: "\(prefix).error"
         case .spinner: "\(prefix).spinner"
         case .keyOff: "\(prefix).keyOff"

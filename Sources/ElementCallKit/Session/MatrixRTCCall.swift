@@ -270,6 +270,20 @@ public final class MatrixRTCCall {
         }
     }
     
+    /// The end the core has reached, or nil while the call goes on: ``status`` once it has caught up,
+    /// and before that the core's own status, read now. The core's end can be waiting in the status
+    /// subscription, or in ``statusUpdates`` for a reader that has not run yet, while something
+    /// else already acts on the call; this is how that something sees it (044 C8).
+    package var reachedEnd: MatrixRTCEndReason? {
+        if case .ended(let reason) = status {
+            return reason
+        }
+        if case .ended(let reason) = MatrixRTCCallStatus(rtcCall.status()) {
+            return reason
+        }
+        return nil
+    }
+    
     private func updateStatus(_ status: MatrixRTCCallStatus) {
         guard status != self.status else { return }
         MatrixRTCLog.info("\(roomID)/\(slotID) is \(status)")

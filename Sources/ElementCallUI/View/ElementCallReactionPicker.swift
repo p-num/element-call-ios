@@ -39,7 +39,7 @@ struct ElementCallReactionPicker: View {
     
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            HStack(spacing: 0) {
+            HStack(alignment: .bottom, spacing: 0) {
                 Text(L10n.reactionsTitle)
                     .font(style.theme.headingMDBold)
                     .foregroundStyle(style.theme.textPrimary)

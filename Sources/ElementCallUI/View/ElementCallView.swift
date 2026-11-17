@@ -48,13 +48,8 @@ struct ElementCallView: View {
                 // A failed call is over: its screen says why and offers the way out, and nothing
                 // of the call is left to draw (034 R27).
                 if case .failed(let failure) = context.viewState.connection {
-                    // Open settings ends the call as Close does: it has failed, and the user starts
-                    // it again after a grant (042 C2, C7).
                     ElementCallFailureView(failure: failure,
-                                           onOpenSettings: failure == .microphoneRefused ? {
-                                               context.send(viewAction: .openSettings)
-                                               context.send(viewAction: .hangUp)
-                                           } : nil,
+                                           primaryAction: Self.primaryAction(for: failure) { context.send(viewAction: $0) },
                                            onClose: { context.send(viewAction: .hangUp) })
                 } else if context.viewState.isMaximized {
                     // Minimized (bar or Picture in Picture): nothing mounted, so the tiles' streams
@@ -174,10 +169,10 @@ struct ElementCallView: View {
         }
         .sheet(item: presentedSheet) { sheet in
             Group {
-                if sheet == .preferences {
-                    ElementCallPreferencesSheet(context: context)
-                } else {
-                    ElementCallMoreSheet(context: context)
+                switch sheet {
+                case .preferences: ElementCallPreferencesSheet(context: context)
+                case .developerOptions: ElementCallDeveloperOptionsSheet(context: context)
+                case .more, .reactions: ElementCallMoreSheet(context: context)
                 }
             }
             // A sheet is a presentation of its own, which takes the window's appearance rather
@@ -339,9 +334,10 @@ struct ElementCallView: View {
     }
     
     /// The picker closes when the phone turns or the app goes to the background, and does not come
-    /// back: it was opened for a moment that has passed (009 R27). Preferences stay, being settings.
+    /// back: it was opened for a moment that has passed (009 R27). The settings sheets stay, being
+    /// settings (037 R12a, 043 R5).
     private func closeReactionsSheet() {
-        if let sheet = context.viewState.presentedSheet, sheet != .preferences {
+        if let sheet = context.viewState.presentedSheet, !sheet.isSettings {
             context.send(viewAction: .dismissSheet)
         }
     }
@@ -504,24 +500,54 @@ struct ElementCallView: View {
             
             Spacer()
             
-            // One way in to the Preferences sheet, which holds the settings, the developer options
-            // and the versions (037 R12, R16, R17). The developer options and the version used to be
-            // here, unlocalised; a sheet has room to say what each does, and grows without the menu
-            // turning into a list of switches.
+            // The settings menu: every item opens a sheet of its own (043 R5). Entries the design has
+            // to come go above these two, which always end the menu (R3), and Developer options is
+            // offered only with the host's developer mode (R4).
             Menu {
                 Button { context.send(viewAction: .present(.preferences)) } label: {
                     Label { Text(L10n.preferencesTitle) } icon: { style.icons.icon(.preferences) }
                 }
                 .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.preferences)
+                if context.viewState.isDeveloperModeEnabled {
+                    Button { context.send(viewAction: .present(.developerOptions)) } label: {
+                        Label { Text(L10n.preferencesDeveloperOptions) } icon: { style.icons.icon(.developerOptions) }
+                    }
+                    .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.developerOptions)
+                }
             } label: {
-                style.icons.icon(.overflow)
+                style.icons.icon(.settings)
             }
             .buttonStyle(ElementCallRoundButtonStyle())
             // Applied here rather than through `control(for:)`, which only the control bar calls.
             // The constant existed and was pinned by name in the identifier tests, but reached no
             // view, so nothing could find this button — including the UI test that reads the menu.
-            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.more)
-            .accessibilityLabel(L10n.a11yMoreOptions)
+            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.settings)
+            .accessibilityLabel(L10n.a11ySettings)
+        }
+    }
+    
+    /// The fix a failure offers beside Close. Each ends the call as Close does: it has failed, and
+    /// the user starts it again.
+    /// - Open settings, for a refused microphone; the user starts again after a grant (042 C2, C7).
+    /// - Use Room state, for an MSC join that failed: the format is only reachable from inside a
+    ///   call, so without this a stored MSC would fail every join and leave no way back (043 R18a).
+    static func primaryAction(for failure: ElementCallFailure,
+                              send: @escaping (ElementCallScreenViewAction) -> Void) -> ElementCallFailureView.PrimaryAction? {
+        switch failure {
+        case .microphoneRefused:
+            ElementCallFailureView.PrimaryAction(title: L10n.actionOpenSettings,
+                                                 identifier: ElementCallAccessibilityIdentifiers.failureOpenSettings) {
+                send(.openSettings)
+                send(.hangUp)
+            }
+        case .mscJoinFailed:
+            ElementCallFailureView.PrimaryAction(title: L10n.failureUseRoomState,
+                                                 identifier: ElementCallAccessibilityIdentifiers.failureUseRoomState) {
+                send(.setMembershipFormat(.roomState))
+                send(.hangUp)
+            }
+        default:
+            nil
         }
     }
     

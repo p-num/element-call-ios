@@ -37,6 +37,7 @@
 "element_call_a11y_selected" = "Selected";
 "element_call_a11y_send_reaction" = "Send a reaction";
 "element_call_a11y_send_reaction_emoji" = "Send reaction %1$@";
+"element_call_a11y_settings" = "Settings";
 "element_call_a11y_sharing_screen" = "Sharing their screen";
 "element_call_a11y_speaking" = "Speaking";
 "element_call_a11y_start_screen_share" = "Share screen";
@@ -64,6 +65,13 @@
 "element_call_call_in_progress" = "Call in progress";
 "element_call_calling" = "Calling…";
 "element_call_connecting" = "Connecting…";
+"element_call_developer_options_membership_format" = "Membership format";
+"element_call_developer_options_membership_format_msc" = "MSC";
+"element_call_developer_options_membership_format_room_state" = "Room state";
+"element_call_developer_options_next_join" = "Takes effect the next time you join a call.";
+"element_call_developer_options_video_codec" = "Video codec";
+"element_call_developer_options_video_codec_auto" = "Auto (%1$@)";
+"element_call_developer_options_video_codec_description" = "Takes effect the next time you join a call. Anyone whose app can’t decode it won’t see your video.";
 "element_call_emoji_reactions" = "Emoji reactions";
 "element_call_error" = "Error";
 "element_call_failure_connection_failed_title" = "Couldn’t connect";
@@ -72,8 +80,10 @@
 "element_call_failure_connection_never_established" = "The call’s media server couldn’t be reached.";
 "element_call_failure_connection_refused" = "The call’s media server refused the connection.";
 "element_call_failure_join_failed_title" = "Couldn’t join the call";
+"element_call_failure_join_membership_format" = "This call used the MSC membership format, which your server may not support.";
 "element_call_failure_join_refused" = "Your server refused to let you join.";
 "element_call_failure_join_timed_out" = "Your server didn’t respond in time.";
+"element_call_failure_use_room_state" = "Use Room state";
 "element_call_hand_lower_failed" = "Your hand could not be lowered.";
 "element_call_hand_raise_failed" = "Your hand could not be raised.";
 "element_call_hand_raised_banner" = "Your hand is raised";
@@ -99,7 +109,10 @@
 "element_call_preferences_reactions_off" = "Off";
 "element_call_preferences_reactions_on" = "On";
 "element_call_preferences_reactions_show" = "Show reactions";
+"element_call_preferences_reactions_show_description" = "Show an animation when anyone sends a reaction.";
 "element_call_preferences_reactions_silent" = "Silent";
+"element_call_preferences_reactions_sounds" = "Play reaction sounds";
+"element_call_preferences_reactions_sounds_description" = "Play a sound effect when anyone sends a reaction.";
 "element_call_preferences_reactions_title" = "Reactions";
 "element_call_preferences_sound_effects" = "Sound effects";
 "element_call_preferences_sound_effects_volume" = "Sound effects volume";

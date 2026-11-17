@@ -129,8 +129,17 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     public var isDeveloperModeEnabled = false
     /// The reactions to draw, oldest first, once each has waited out its spread (037).
     public var reactions: [ElementCallReactionBubble] = []
-    /// The user's choice for reactions, which the Preferences sheet shows and changes (037 R13).
-    public var reactionsPreference: ElementCallReactionsPreference = .withSound
+    /// Whether received reactions rise as bubbles, from Preferences (043 R6).
+    public var showsReactions = true
+    /// Whether received reactions play their sound. Shown, greyed, while ``showsReactions`` is off
+    /// (043 R7).
+    public var playsReactionSounds = true
+    /// The format the next join uses, from Developer options (043 R11, R14).
+    public var membershipFormat: MatrixRTCMembershipFormat = .roomState
+    /// The codec the next join publishes video with, from Developer options (043 R15).
+    public var videoCodec: MatrixRTCVideoCodec = .auto
+    /// What Developer options offers for the codec: Auto, then what this device encodes (043 R15).
+    public var videoCodecs: [MatrixRTCVideoCodec] = [.auto]
     /// How loud the call's sound effects play, 0 to 1 of the call's level (037 R22).
     public var soundEffectsVolume: Float = 0.5
     /// The sheet open over the call, if any. Closed by the screen when the call is minimised, enters
@@ -357,12 +366,23 @@ public nonisolated enum ElementCallBarSlot: Sendable, Hashable {
 
 public nonisolated enum ElementCallSheet: Sendable, Hashable, Identifiable {
     case preferences
+    /// Shown only with the host's developer mode (043 R4).
+    case developerOptions
     /// The bar's `…`: what else the call offers.
     case more
     case reactions
     
     public var id: Self {
         self
+    }
+    
+    /// The settings menu's sheets, which stay open across rotation and backgrounding, as settings
+    /// do; the others were opened for a moment that has passed (043 R5, 009 R27).
+    public var isSettings: Bool {
+        switch self {
+        case .preferences, .developerOptions: true
+        case .more, .reactions: false
+        }
     }
 }
 
@@ -378,7 +398,10 @@ public nonisolated enum ElementCallScreenViewAction: Sendable {
     case present(ElementCallSheet)
     case dismissSheet
     case sendReaction(MatrixRTCReactionKind)
-    case setReactionsPreference(ElementCallReactionsPreference)
+    case setShowsReactions(Bool)
+    case setPlaysReactionSounds(Bool)
+    case setMembershipFormat(MatrixRTCMembershipFormat)
+    case setVideoCodec(MatrixRTCVideoCodec)
     case setSoundEffectsVolume(Float)
     /// The slider was let go: one short sound at the volume chosen (037 R24).
     case playSoundEffectsVolumeSample

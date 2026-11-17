@@ -16,6 +16,9 @@ incoming answers. Hosts may read permission state in entry preflight, but must n
 parallel with the controller. Cancel or expire an answer with `hangUp()`; a late permission reply
 cannot claim or publish that call.
 
+- **Call analytics (044).** `ElementCallController.init` takes `analytics:`, an `ElementCallAnalyticsProtocol`, defaulting to nil. Forward each `ElementCallAnalyticsEvent` under its `name` with its `properties` unchanged, only with the user's analytics consent, to the PostHog project Element Call reports to. Call `hangUp()` before discarding a controller with a call in it, logout included, or that call reports no end.
+- `MatrixRTCError` gains `noLiveKitTransport(transportType:)` and `tokenEndpointUnsupported`, which used to arrive as `.ffi`. An exhaustive `switch` over `MatrixRTCError` needs the two cases.
+
 ## 0.1.0-rc.16 - 2026-11-10
 
 **Core: matrix-rust-rtc `0.5.0-rc.11`.** `MatrixRTCConnectionLossReason` gains

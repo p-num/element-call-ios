@@ -194,14 +194,53 @@ public final nonisolated class ElementCallFakeLogger: ElementCallLoggingProtocol
     }
 }
 
+/// Keeps every analytics event in order, so a test can assert on what the call reported (044).
+public final nonisolated class ElementCallFakeAnalytics: ElementCallAnalyticsProtocol {
+    private let recorded = Mutex<[ElementCallAnalyticsEvent]>([])
+    private let hook = Mutex(TrackHook())
+    
+    public init() { }
+    
+    public var events: [ElementCallAnalyticsEvent] {
+        recorded.withLock { $0 }
+    }
+    
+    /// Called with each event as it is tracked, after it is recorded: a test looks at the controller
+    /// at the moment of delivery from here.
+    public var onTrack: (@Sendable (ElementCallAnalyticsEvent) -> Void)? {
+        get { hook.withLock { $0.action } }
+        set { hook.withLock { $0 = TrackHook(action: newValue) } }
+    }
+    
+    public func track(_ event: ElementCallAnalyticsEvent) {
+        recorded.withLock { $0.append(event) }
+        hook.withLock { $0.action }?(event)
+    }
+}
+
+/// Boxed, because a function value stored directly in a `Mutex` is reabstracted on every access.
+private nonisolated struct TrackHook {
+    var action: (@Sendable (ElementCallAnalyticsEvent) -> Void)?
+}
+
 /// Preferences held in memory, so a preview or the harness never writes the device's.
 public final class ElementCallFakePreferencesStore: ElementCallPreferencesStoreProtocol {
-    public var reactions: ElementCallReactionsPreference
+    public var showsReactions: Bool
+    public var playsReactionSounds: Bool
     public var soundEffectsVolume: Float
+    public var membershipFormat: MatrixRTCMembershipFormat
+    public var videoCodec: MatrixRTCVideoCodec
     
-    public init(reactions: ElementCallReactionsPreference = .withSound, soundEffectsVolume: Float = 0.5) {
-        self.reactions = reactions
+    public init(showsReactions: Bool = true,
+                playsReactionSounds: Bool = true,
+                soundEffectsVolume: Float = 0.5,
+                membershipFormat: MatrixRTCMembershipFormat = .roomState,
+                videoCodec: MatrixRTCVideoCodec = .auto) {
+        self.showsReactions = showsReactions
+        self.playsReactionSounds = playsReactionSounds
         self.soundEffectsVolume = soundEffectsVolume
+        self.membershipFormat = membershipFormat
+        self.videoCodec = videoCodec
     }
 }
 

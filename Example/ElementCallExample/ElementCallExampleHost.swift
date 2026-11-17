@@ -123,6 +123,11 @@ final class ElementCallExampleHost {
                 state.audioOutputs = ElementCallPreviewFixtures.headsetAudioOutputs
                 state.audioOutput = state.audioOutputs.first
             }
+            // Every fixture has developer mode on; this is the host that has not, so the settings
+            // menu offers Preferences alone (043 R4).
+            if ProcessInfo.processInfo.arguments.contains("-noDeveloperMode") {
+                state.isDeveloperModeEnabled = false
+            }
             // Built from the view state rather than defaulted, so the name on the bar and the name
             // in the top bar cannot drift apart. They agree today only by coincidence: the fake
             // room and `ElementCallPreviewFixtures.connected` happen to pick the same string.
@@ -246,10 +251,18 @@ final class ElementCallExampleHost {
                 labFormat = lab.format
                 let room = SDKLabRoomContext(room: lab.room)
                 await room.load()
+                // The format is a preference now, not an option (043 R13): the Lab, which chose the
+                // session's, writes it where the call reads it, as any host controlling it would.
+                let preferences = ElementCallUserDefaultsPreferencesStore()
+                preferences.membershipFormat = lab.format
+                // Developer mode on: the Lab is where a developer checks a real call, with tile
+                // stats and the codec choice (043 R10, R15) reachable from the settings menu.
                 let controller = ElementCallController(backend: lab.backend,
                                                        system: ElementCallExampleLabSystem(),
-                                                       options: ElementCallOptions(membershipFormat: lab.format),
-                                                       logger: logger)
+                                                       options: ElementCallOptions(isDeveloperModeEnabled: true),
+                                                       logger: logger,
+                                                       preferences: preferences,
+                                                       analytics: ElementCallExampleLabAnalytics(logger: logger))
                 controller.actions
                     .sink { [weak self] action in self?.handle(action) }
                     .store(in: &cancellables)

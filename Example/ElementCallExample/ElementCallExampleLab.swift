@@ -117,6 +117,25 @@ struct ElementCallExampleLabLogger: ElementCallLoggingProtocol {
     }
 }
 
+/// The lab's analytics receiver (044): each event's name and properties, on the lab's log, which is
+/// how a check by hand reads them off a real call. A host forwards them to its analytics instead.
+struct ElementCallExampleLabAnalytics: ElementCallAnalyticsProtocol {
+    let logger: ElementCallExampleLabLogger
+    
+    func track(_ event: ElementCallAnalyticsEvent) {
+        let properties = event.properties
+            .sorted { $0.key < $1.key }
+            .map { key, value in
+                switch value {
+                case .string(let text): "\(key)=\(text)"
+                case .int(let number): "\(key)=\(number)"
+                }
+            }
+            .joined(separator: " ")
+        logger.log(.info, "analytics: \(event.name) \(properties)")
+    }
+}
+
 /// The lab tab: the account kept on this phone, back into the call with it or log it out, and the
 /// scanner for a code. Scanning the same account's code reuses the kept device; another account's
 /// logs the kept one out first.

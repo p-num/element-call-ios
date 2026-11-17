@@ -37,6 +37,8 @@ public nonisolated protocol ElementCallThemeProtocol: Sendable {
     @MainActor var textPrimary: Color { get }
     @MainActor var textSecondary: Color { get }
     @MainActor var textCriticalPrimary: Color { get }
+    /// A setting that can't be changed now, such as the reaction sound while reactions are hidden.
+    @MainActor var textDisabled: Color { get }
     
     // Borders
     @MainActor var borderSuccessSubtle: Color { get }
@@ -91,6 +93,12 @@ public extension ElementCallThemeProtocol {
     /// keeps compiling and draws the name tag's spinner as designed.
     var iconSecondary: Color {
         CompoundCoreColorTokens.gray900
+    }
+    
+    /// Compound's own, as ``iconSecondary`` is, so a host theme written before this existed keeps
+    /// compiling and greys a disabled setting as designed.
+    var textDisabled: Color {
+        CompoundCoreColorTokens.gray800
     }
     
     /// Element Call web's: the dark theme's translucent greys, since the call screen is always dark.
@@ -175,12 +183,18 @@ public nonisolated enum ElementCallIcon: Sendable, CaseIterable {
     case overflow
     /// The overflow menu's way into the Preferences sheet (037 R12).
     case preferences
+    /// The top bar's settings menu (043 R1).
+    case settings
+    /// Developer options, in the settings menu (043 R3).
+    case developerOptions
     case collapse
     /// The service interruptions indicator, and the arrow saying it opens something.
     case info
     case chevronRight
     /// A sheet's way out (037 R12a).
     case close
+    /// The chosen row of a settings choice, such as the format or the codec (043 R11, R15).
+    case check
     /// The failure screen.
     case error
     /// A tile whose media is not arriving; turned by the view.

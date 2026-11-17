@@ -75,13 +75,13 @@ struct ReactionScreenTests {
     @Test
     func theSheetsChoicesAreKeptAndApplyToTheCallInProgress() async throws {
         let screen = try await Screen()
-        screen.viewModel.context.send(viewAction: .setReactionsPreference(.off))
+        screen.viewModel.context.send(viewAction: .setShowsReactions(false))
         screen.viewModel.context.send(viewAction: .setSoundEffectsVolume(0.3))
         
-        #expect(screen.preferences.reactions == .off)
+        #expect(!screen.preferences.showsReactions)
         #expect(screen.preferences.soundEffectsVolume == 0.3)
         #expect(screen.session.reactionsMode == .off)
-        try await waitUntil { screen.viewModel.context.viewState.reactionsPreference == .off }
+        try await waitUntil { !screen.viewModel.context.viewState.showsReactions }
         #expect(screen.viewModel.context.viewState.soundEffectsVolume == 0.3)
         
         screen.react(from: "BOB")
@@ -152,7 +152,7 @@ struct ReactionScreenTests {
         let scripted: MatrixRTCScriptedSession
         let session: MatrixRTCMediaSession
         let room = Room()
-        let preferences = ElementCallFakePreferencesStore(reactions: .withoutSound)
+        let preferences = ElementCallFakePreferencesStore(playsReactionSounds: false)
         let controller: ElementCallController
         let viewModel: ElementCallScreenViewModel
         

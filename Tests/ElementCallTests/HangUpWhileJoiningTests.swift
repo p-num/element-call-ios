@@ -83,6 +83,30 @@ struct HangUpWhileJoiningTests {
                                        .end(roomID: second.roomID, reason: .local)])
     }
     
+    /// A second hang-up before the first had finished ran the teardown again, by when a host
+    /// starting the next call on `.ended` had started it, so the second teardown ended that call.
+    @Test("Hanging up twice ends the call once and leaves the next call alone")
+    func hangingUpTwiceLeavesTheNextCallAlone() async throws {
+        let fixture = Fixture()
+        fixture.recorder.onEnded = { [controller = fixture.controller, callData, second] in
+            controller.reset()
+            controller.startCall(callData, room: second)
+        }
+        fixture.controller.startCall(callData, room: first)
+        try await fixture.waitForTheRoom(first)
+        
+        fixture.controller.hangUp()
+        try await fixture.hangUp(first)
+        try await fixture.waitForTheRoom(second)
+        
+        #expect(fixture.controller.connection == .joining)
+        #expect(fixture.controller.room?.roomID == second.roomID)
+        #expect(fixture.recorder.endedCount == 1)
+        #expect(fixture.systemEnds == [.end(roomID: first.roomID, reason: .local)])
+        
+        try await fixture.hangUp(second)
+    }
+    
     // MARK: - Helpers
     
     private final class Fixture {

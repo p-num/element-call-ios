@@ -39,6 +39,28 @@ nonisolated extension MatrixRTCMembershipFormat {
     }
 }
 
+nonisolated extension MatrixRTCVideoCodec {
+    var ffi: FfiVideoCodecPreference {
+        switch self {
+        case .auto: .auto
+        case .vp8: .vp8
+        case .h264: .h264
+        case .vp9: .vp9
+        case .av1: .av1
+        }
+    }
+    
+    init(_ ffi: FfiVideoCodecPreference) {
+        self = switch ffi {
+        case .auto: .auto
+        case .vp8: .vp8
+        case .h264: .h264
+        case .vp9: .vp9
+        case .av1: .av1
+        }
+    }
+}
+
 nonisolated extension MatrixRTCCallKind {
     var ffi: FfiCallKind {
         switch self {

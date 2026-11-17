@@ -102,6 +102,10 @@ public final class ElementCallScreenContext {
     public static func harness(state: ElementCallScreenViewState,
                                style: ElementCallStyle = .stock,
                                onHostAction: ((ElementCallScreenViewAction) -> Void)? = nil) -> ElementCallScreenContext {
+        var state = state
+        // The device's own list, as the live screen has it: a harness is a phone in someone's hand,
+        // where a preview pins its list for a stable image (043 R15).
+        state.videoCodecs = MatrixRTCClient.supportedVideoCodecs()
         let context = ElementCallScreenContext(viewState: state, style: style)
         context.isHarness = true
         // Weakly, or the context owns a closure that owns the context.
@@ -137,6 +141,7 @@ public final class ElementCallScreenContext {
                 let position = isRaised ? 1 + context.viewState.tiles.count { !$0.isLocal && $0.hasHandRaised } : nil
                 context.viewState.tiles = ElementCallScreenViewState.showingHands(context.viewState.tiles.map { $0.withHandPosition(position) })
             case let .present(sheet):
+                guard sheet != .developerOptions || context.viewState.isDeveloperModeEnabled else { return }
                 context.viewState.presentedSheet = sheet
             case .dismissSheet:
                 context.viewState.presentedSheet = nil
@@ -144,8 +149,15 @@ public final class ElementCallScreenContext {
                 // Ours comes back from the room as everyone's does, and a fixture has no room. The
                 // `reactions` fixture runs the real path, over a scripted call that echoes it.
                 context.viewState.presentedSheet = nil
-            case let .setReactionsPreference(preference):
-                context.viewState.reactionsPreference = preference
+            case let .setShowsReactions(isOn):
+                context.viewState.showsReactions = isOn
+            case let .setPlaysReactionSounds(isOn):
+                guard context.viewState.showsReactions else { return }
+                context.viewState.playsReactionSounds = isOn
+            case let .setMembershipFormat(format):
+                context.viewState.membershipFormat = format
+            case let .setVideoCodec(codec):
+                context.viewState.videoCodec = codec
             case let .setSoundEffectsVolume(volume):
                 context.viewState.soundEffectsVolume = volume
             case .playSoundEffectsVolumeSample, .openSettings:
@@ -229,6 +241,8 @@ public final class ElementCallScreenViewModel {
         context.viewState.isDeveloperModeEnabled = controller.options.isDeveloperModeEnabled
         context.viewState.isScreenSharingEnabled = controller.options.isScreenSharingEnabled
         context.viewState.canSwitchCamera = MatrixRTCMediaSession.canSwitchCamera
+        // The device's encoders, which do not change under a running app (043 R15).
+        context.viewState.videoCodecs = MatrixRTCClient.supportedVideoCodecs()
         
         if let room {
             room.displayNamePublisher
@@ -277,6 +291,9 @@ public final class ElementCallScreenViewModel {
         case .toggleTileStats:
             controller.toggleTileStats()
         case let .present(sheet):
+            // Not only a hidden menu item: nothing reaches Developer options without developer
+            // mode (043 R4), as nothing reaches tile stats.
+            guard sheet != .developerOptions || context.viewState.isDeveloperModeEnabled else { return }
             context.viewState.presentedSheet = sheet
         case .dismissSheet:
             context.viewState.presentedSheet = nil
@@ -285,8 +302,14 @@ public final class ElementCallScreenViewModel {
             // Sending dismisses the picker (009 R19), whatever then happens to the send: a refused
             // or failed one shows nothing (R23), so there is nothing to keep it open for.
             context.viewState.presentedSheet = nil
-        case let .setReactionsPreference(preference):
-            controller.setReactionsPreference(preference)
+        case let .setShowsReactions(isOn):
+            controller.setShowsReactions(isOn)
+        case let .setPlaysReactionSounds(isOn):
+            controller.setPlaysReactionSounds(isOn)
+        case let .setMembershipFormat(format):
+            controller.setMembershipFormat(format)
+        case let .setVideoCodec(codec):
+            controller.setVideoCodec(codec)
         case let .setSoundEffectsVolume(volume):
             controller.setSoundEffectsVolume(volume)
         case .playSoundEffectsVolumeSample:
@@ -366,7 +389,10 @@ public final class ElementCallScreenViewModel {
         state.audioOutput = controller.audioOutput
         state.isTileStatsVisible = controller.isTileStatsVisible
         state.isMaximized = controller.isMaximized
-        state.reactionsPreference = controller.reactionsPreference
+        state.showsReactions = controller.showsReactions
+        state.playsReactionSounds = controller.playsReactionSounds
+        state.membershipFormat = controller.membershipFormat
+        state.videoCodec = controller.videoCodec
         state.soundEffectsVolume = controller.soundEffectsVolume
         // Nowhere to draw it once the call is out of the way, and nothing to come back to after the
         // call (037 R12a).

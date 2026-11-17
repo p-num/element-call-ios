@@ -14,12 +14,20 @@ import SwiftUI
 /// that no longer existed.
 ///
 /// Closing is the hang-up the controller holds the end for, so the host dismisses as it always has.
-/// A refused microphone adds Open settings above it, as the primary action, and Close drops to a
-/// plain text button (042 R7).
+/// A failure with a way to fix it adds that as the primary action above Close, which drops to a
+/// plain text button: Open settings for a refused microphone (042 R7), Use Room state for an MSC
+/// join that failed (043 R18a).
 struct ElementCallFailureView: View {
+    /// The fix a failure offers, above Close.
+    struct PrimaryAction {
+        let title: String
+        let identifier: String
+        let perform: () -> Void
+    }
+    
     @Environment(\.elementCallStyle) private var style
     let failure: ElementCallFailure
-    var onOpenSettings: (() -> Void)?
+    var primaryAction: PrimaryAction?
     let onClose: () -> Void
     
     var body: some View {
@@ -42,9 +50,9 @@ struct ElementCallFailureView: View {
             .multilineTextAlignment(.center)
             .fixedSize(horizontal: false, vertical: true)
             Spacer()
-            if let onOpenSettings {
-                primaryButton(L10n.actionOpenSettings, action: onOpenSettings)
-                    .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.failureOpenSettings)
+            if let primaryAction {
+                primaryButton(primaryAction.title, action: primaryAction.perform)
+                    .accessibilityIdentifier(primaryAction.identifier)
                 Button(action: onClose) {
                     Text(L10n.actionClose)
                         .font(style.theme.bodyLGSemibold)
@@ -81,7 +89,7 @@ struct ElementCallFailureView: View {
 struct ElementCallFailureView_Previews: PreviewProvider, TestablePreview {
     static func screen(_ failure: ElementCallFailure) -> some View {
         ElementCallFailureView(failure: failure,
-                               onOpenSettings: failure == .microphoneRefused ? { } : nil,
+                               primaryAction: ElementCallView.primaryAction(for: failure) { _ in },
                                onClose: { })
             .environment(\.colorScheme, .dark)
     }
@@ -95,5 +103,8 @@ struct ElementCallFailureView_Previews: PreviewProvider, TestablePreview {
             .previewDisplayName("Other")
         screen(.microphoneRefused)
             .previewDisplayName("Microphone refused")
+        // The membership format may be the cause, and the screen offers the way back (043 R18, R18a).
+        screen(.mscJoinFailed("Join refused: M_UNRECOGNIZED"))
+            .previewDisplayName("MSC join failed")
     }
 }

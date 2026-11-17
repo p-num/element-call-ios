@@ -26,7 +26,7 @@ nonisolated struct AccessibilityIdentifierTests {
         #expect(ElementCallAccessibilityIdentifiers.screenShare == "elementCall.screenShare")
         #expect(ElementCallAccessibilityIdentifiers.minimize == "elementCall.minimize")
         #expect(ElementCallAccessibilityIdentifiers.exitFullscreen == "elementCall.exitFullscreen")
-        #expect(ElementCallAccessibilityIdentifiers.more == "elementCall.more")
+        #expect(ElementCallAccessibilityIdentifiers.settings == "elementCall.settings")
         #expect(ElementCallAccessibilityIdentifiers.heroIndicator == "elementCall.heroIndicator")
         #expect(ElementCallAccessibilityIdentifiers.heroPrevious == "elementCall.heroPrevious")
         #expect(ElementCallAccessibilityIdentifiers.heroNext == "elementCall.heroNext")
@@ -37,10 +37,19 @@ nonisolated struct AccessibilityIdentifierTests {
         #expect(ElementCallAccessibilityIdentifiers.preferences == "elementCall.preferences")
         #expect(ElementCallAccessibilityIdentifiers.preferencesSheet == "elementCall.preferencesSheet")
         #expect(ElementCallAccessibilityIdentifiers.preferencesClose == "elementCall.preferences.close")
-        #expect(ElementCallAccessibilityIdentifiers.preferencesReactions == "elementCall.preferences.reactions")
-        #expect(ElementCallAccessibilityIdentifiers.preferencesTileStats == "elementCall.preferences.tileStats")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesShowReactions == "elementCall.preferences.showReactions")
+        #expect(ElementCallAccessibilityIdentifiers.preferencesPlayReactionSounds == "elementCall.preferences.playReactionSounds")
         #expect(ElementCallAccessibilityIdentifiers.preferencesSoundEffectsVolume == "elementCall.preferences.soundEffectsVolume")
         #expect(ElementCallAccessibilityIdentifiers.preferencesVersion == "elementCall.preferences.version")
+        #expect(ElementCallAccessibilityIdentifiers.failureUseRoomState == "elementCall.failureUseRoomState")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptions == "elementCall.developerOptions")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsSheet == "elementCall.developerOptionsSheet")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsClose == "elementCall.developerOptions.close")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsTileStats == "elementCall.developerOptions.tileStats")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsMembershipFormat(.msc) == "elementCall.developerOptions.membershipFormat.msc")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsMembershipFormat(.roomState) == "elementCall.developerOptions.membershipFormat.roomState")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsVideoCodec(.auto) == "elementCall.developerOptions.videoCodec.auto")
+        #expect(ElementCallAccessibilityIdentifiers.developerOptionsVideoCodec(.h264) == "elementCall.developerOptions.videoCodec.h264")
         #expect(ElementCallAccessibilityIdentifiers.reactions == "elementCall.reactions")
         #expect(ElementCallAccessibilityIdentifiers.controlsMore == "elementCall.controlsMore")
         #expect(ElementCallAccessibilityIdentifiers.lowerHand == "elementCall.lowerHand")
@@ -49,10 +58,13 @@ nonisolated struct AccessibilityIdentifierTests {
         #expect(ElementCallAccessibilityIdentifiers.reaction(MatrixRTCReactionKind(name: "thumbsup", emoji: "👍")) == "elementCall.reaction.thumbsup")
     }
     
-    /// The bar's `…` is not the top bar's: the derived identifier would have made them one.
-    @Test("The two overflow controls answer to different identifiers")
-    func overflowControlsAreDistinct() {
-        #expect(ElementCallAccessibilityIdentifiers.controlsMore != ElementCallAccessibilityIdentifiers.control(for: .overflow))
+    /// The top bar's menu is settings now, and the bar's `…` the only overflow glyph: the two must not
+    /// answer to one identifier, as they would have had the menu kept the glyph (043 R1).
+    @Test("The settings menu and the bar's More answer to different identifiers")
+    func settingsAndMoreAreDistinct() {
+        #expect(ElementCallAccessibilityIdentifiers.control(for: .settings) == ElementCallAccessibilityIdentifiers.settings)
+        #expect(ElementCallAccessibilityIdentifiers.control(for: .overflow) == ElementCallAccessibilityIdentifiers.controlsMore)
+        #expect(ElementCallAccessibilityIdentifiers.settings != ElementCallAccessibilityIdentifiers.controlsMore)
     }
     
     /// The camera spelling is the one an external rig pins, and it has not moved. A share is a

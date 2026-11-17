@@ -51,6 +51,9 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     }
     
     private let initialStatus: FfiCallStatus
+    /// What `status()` answers once set, without anything reaching the subscription: the core
+    /// ahead of the status it has delivered.
+    private let currentStatus = Mutex<FfiCallStatus?>(nil)
     private let intent: FfiCallIntent
     let statusSubscription = FakeStatusSubscription()
     
@@ -167,7 +170,12 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     }
     
     func status() -> FfiCallStatus {
-        initialStatus
+        currentStatus.withLock { $0 } ?? initialStatus
+    }
+    
+    /// The core reaching `status` without delivering it yet.
+    func reach(_ status: FfiCallStatus) {
+        currentStatus.withLock { $0 = status }
     }
     
     func subscribeStatus() -> CallStatusSubscription {

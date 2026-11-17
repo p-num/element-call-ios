@@ -7,7 +7,7 @@
 
 /// Time on `clock` since this was called. Opens the existential so its instant can be kept:
 /// `any Clock` has no `now` to subtract.
-func stopwatch(_ clock: some Clock<Duration>) -> () -> Duration {
+package func stopwatch(_ clock: some Clock<Duration>) -> () -> Duration {
     let start = clock.now
     return { start.duration(to: clock.now) }
 }

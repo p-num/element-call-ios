@@ -25,6 +25,9 @@ import SwiftUI
 /// and saw it already back.
 ///
 /// `-headset` connects pretend AirPods to every fixture, so the audio button is a menu.
+///
+/// `-noDeveloperMode` opens a fixture as a host without developer mode would, so the settings menu
+/// has no Developer options (043 R4).
 @main
 struct ElementCallExampleApp: App {
     /// The package's and the core's log, on stderr, which `devicectl ... launch --console` and

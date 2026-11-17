@@ -49,6 +49,21 @@ struct MediaPermissionsTests {
         #expect(fixture.recorder.endedCount == 1)
     }
     
+    /// A close that lands while the failure is still tearing down is not lost: the screen used to
+    /// stay up, held for a close that had already happened, and the system heard the end twice.
+    @Test("Closing a failure that is still ending closes it")
+    func closingAFailureThatIsStillEndingClosesIt() async throws {
+        let fixture = Fixture(microphone: .refused)
+        fixture.controller.startCall(videoCall, room: room)
+        fixture.controller.hangUp()
+        
+        try await waitUntil { fixture.recorder.endedCount == 1 }
+        try await waitUntil { fixture.system.requests.contains(.end(roomID: room.roomID, reason: .failed)) }
+        try await Task.sleep(for: .milliseconds(50))
+        #expect(fixture.recorder.endedCount == 1)
+        #expect(fixture.system.requests.filter { $0 == .end(roomID: room.roomID, reason: .failed) }.count == 1)
+    }
+    
     /// R1: nothing is claimed while the dialog is open; a grant then goes on to the join.
     @Test
     func nothingIsClaimedWhileTheMicrophoneIsAsked() async throws {
