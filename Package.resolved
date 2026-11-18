@@ -1,5 +1,5 @@
 {
-  "originHash" : "73782da31bdcf8802490f4f9fc9c63fa3631d37254fc91a068f14ac2346c76e0",
+  "originHash" : "ca298d54f6322dfb14a8a4de6d5184274792172dd328c18345799a9c12e9b50d",
   "pins" : [
     {
       "identity" : "compound-design-tokens",
@@ -15,8 +15,8 @@
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/p-num/matrix-rust-rtc",
       "state" : {
-        "revision" : "b2f060fe609b4fd95ae2208ca7ac0e97e2751169",
-        "version" : "0.5.0-rc.9-letro.1"
+        "revision" : "42a498c51afd811714323719e2fb802fa244418d",
+        "version" : "0.5.0-rc.11-letro.1"
       }
     },
     {
