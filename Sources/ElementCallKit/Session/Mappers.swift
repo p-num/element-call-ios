@@ -231,6 +231,11 @@ nonisolated extension MatrixRTCMembership {
         switch membership.identityKind {
         case .perJoinMemberId:
             generation = .perJoinMemberID
+        case .legacyJoinId:
+            generation = membership.legacyJoinId.flatMap { joinID in
+                joinID.utf8.count == 32 && joinID.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+                    ? .legacyJoinID(joinID) : nil
+            } ?? .unavailable
         case .legacyMembershipTimestamp:
             generation = membership.membershipTs.map { .legacy(createdTimestampMilliseconds: $0) } ?? .unavailable
         case .unavailable:

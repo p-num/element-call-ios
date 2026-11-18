@@ -154,6 +154,8 @@ public nonisolated struct MatrixRTCLeaveReason: Sendable, Hashable {
 public nonisolated enum MatrixRTCParticipationGeneration: Sendable, Hashable {
     /// The member ID is fresh for this join and stable across refreshes.
     case perJoinMemberID
+    /// A stable, random generation carried by one legacy join and its refreshes.
+    case legacyJoinID(String)
     /// Legacy member IDs can be reused; the exact unsigned creation timestamp separates joins.
     case legacy(createdTimestampMilliseconds: UInt64)
     /// Neither supported generation is known. The host must keep correlation unbound.

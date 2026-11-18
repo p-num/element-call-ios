@@ -55,12 +55,15 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     /// ahead of the status it has delivered.
     private let currentStatus = Mutex<FfiCallStatus?>(nil)
     private let intent: FfiCallIntent
+    private let ownLegacyJoinID: String?
     let statusSubscription = FakeStatusSubscription()
     
-    init(status: FfiCallStatus = .connected(sinceMs: 0, degraded: false), intent: FfiCallIntent = .video, holdsLeave: Bool = false) {
+    init(status: FfiCallStatus = .connected(sinceMs: 0, degraded: false), intent: FfiCallIntent = .video,
+         holdsLeave: Bool = false, legacyJoinID: String? = nil) {
         self.holdsLeave = holdsLeave
         initialStatus = status
         self.intent = intent
+        ownLegacyJoinID = legacyJoinID
     }
     
     /// Every hand request made, answered or not.
@@ -133,6 +136,10 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
         "@me:example.com:DEVICE"
     }
     
+    func legacyJoinId() -> String? {
+        ownLegacyJoinID
+    }
+
     func isLive() -> Bool {
         true
     }

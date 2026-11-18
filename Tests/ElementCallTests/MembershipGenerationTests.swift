@@ -16,6 +16,10 @@ struct MembershipGenerationTests {
         let cases: [(JoinedMembership, MatrixRTCParticipationGeneration)] = [
             (membership(kind: .perJoinMemberId, timestamp: nil), .perJoinMemberID),
             (membership(kind: .perJoinMemberId, timestamp: UInt64.max), .perJoinMemberID),
+            (membership(kind: .legacyJoinId, timestamp: nil, joinID: "0123456789abcdef0123456789abcdef"), .legacyJoinID("0123456789abcdef0123456789abcdef")),
+            (membership(kind: .legacyJoinId, timestamp: UInt64.max, joinID: "0123456789abcdef0123456789abcdef"), .legacyJoinID("0123456789abcdef0123456789abcdef")),
+            (membership(kind: .legacyJoinId, timestamp: 123, joinID: nil), .unavailable),
+            (membership(kind: .legacyJoinId, timestamp: 123, joinID: "0123456789abcdef0123456789abcdeF"), .unavailable),
             (membership(timestamp: 0), .legacy(createdTimestampMilliseconds: 0)),
             (membership(timestamp: UInt64.max), .legacy(createdTimestampMilliseconds: UInt64.max)),
             (membership(timestamp: nil), .unavailable),
@@ -45,14 +49,22 @@ struct MembershipGenerationTests {
     }
     
     @Test
+    func callExposesItsCurrentLegacyJoinBeforeTheFirstMembershipEcho() {
+        let joinID = "0123456789abcdef0123456789abcdef"
+        let call = MatrixRTCCall(rtcCall: FakeRTCCall(legacyJoinID: joinID))
+        #expect(call.members.isEmpty)
+        #expect(call.legacyJoinID == joinID)
+    }
+
+    @Test
     func independentObserversReceiveGenerationChangesIncludingEmptySnapshots() async {
         let call = MatrixRTCCall(rtcCall: FakeRTCCall())
         var first = call.membershipSnapshots().makeAsyncIterator()
         var second = call.membershipSnapshots().makeAsyncIterator()
         #expect(await first.next() == [])
         #expect(await second.next() == [])
-        let joined = [MatrixRTCMembership(membership(timestamp: 123))]
-        let rejoined = [MatrixRTCMembership(membership(timestamp: 124))]
+        let joined = [MatrixRTCMembership(membership(kind: .legacyJoinId, timestamp: 123, joinID: "00000000000000000000000000000001"))]
+        let rejoined = [MatrixRTCMembership(membership(kind: .legacyJoinId, timestamp: 123, joinID: "00000000000000000000000000000002"))]
         call.updateMembers(joined)
         call.updateMembers(rejoined)
         call.updateMembers([])
@@ -65,10 +77,10 @@ struct MembershipGenerationTests {
         #expect(await second.next() == nil)
     }
     
-    private func membership(kind: FfiMembershipIdentityKind = .legacyMembershipTimestamp, timestamp: UInt64?) -> JoinedMembership {
+    private func membership(kind: FfiMembershipIdentityKind = .legacyMembershipTimestamp, timestamp: UInt64?, joinID: String? = nil) -> JoinedMembership {
         JoinedMembership(roomId: "!room:example.org", slotId: "m.call#room", sender: "@alice:example.org",
                          senderDeviceId: "DEVICE", stickyKey: "sticky-key", memberId: "legacy-device-member",
-                         membershipEventId: "$original-event", membershipTs: timestamp, identityKind: kind,
+                         membershipEventId: "$original-event", membershipTs: timestamp, legacyJoinId: joinID, identityKind: kind,
                          application: "m.call", transports: [], canSubscribe: [])
     }
 }

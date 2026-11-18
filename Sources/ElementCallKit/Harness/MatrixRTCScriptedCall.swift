@@ -153,6 +153,10 @@ private final nonisolated class ScriptedCore: RtcCallProtocol, Sendable {
         "@alice:example.com:DEVICE"
     }
     
+    func legacyJoinId() -> String? {
+        nil
+    }
+
     func isLive() -> Bool {
         true
     }
