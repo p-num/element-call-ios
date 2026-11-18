@@ -580,6 +580,7 @@ struct ElementCallMediaIndicator: View {
 struct ElementCallSpinner: View {
     @Environment(\.elementCallStyle) private var style
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    @Environment(\.elementCallSpinnerTurns) private var turns
     @State private var isTurning = false
     
     var body: some View {
@@ -587,7 +588,7 @@ struct ElementCallSpinner: View {
             .foregroundStyle(style.theme.iconSecondary)
             .rotationEffect(.degrees(isTurning ? 360 : 0))
             .animation(reduceMotion ? nil : .linear(duration: 1).repeatForever(autoreverses: false), value: isTurning)
-            .onAppear { isTurning = true }
+            .onAppear { isTurning = turns }
     }
 }
 

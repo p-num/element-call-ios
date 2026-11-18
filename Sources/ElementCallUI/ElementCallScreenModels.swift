@@ -85,10 +85,18 @@ public nonisolated struct ElementCallAlert: Identifiable, Equatable, Sendable {
     public let id = UUID()
     public let title: String
     public let message: String
+    /// A second button beside Cancel. Nil for a message, which has OK alone.
+    public let action: Action?
     
-    public init(title: String, message: String) {
+    public nonisolated enum Action: Sendable, Equatable {
+        /// The camera is refused: Open settings (042 R11).
+        case openSettings
+    }
+    
+    public init(title: String, message: String, action: Action? = nil) {
         self.title = title
         self.message = message
+        self.action = action
     }
 }
 
@@ -121,13 +129,22 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     public var isDeveloperModeEnabled = false
     /// The reactions to draw, oldest first, once each has waited out its spread (037).
     public var reactions: [ElementCallReactionBubble] = []
-    /// The user's choice for reactions, which the Preferences sheet shows and changes (037 R13).
-    public var reactionsPreference: ElementCallReactionsPreference = .withSound
+    /// Whether received reactions rise as bubbles, from Preferences (043 R6).
+    public var showsReactions = true
+    /// Whether received reactions play their sound. Shown, greyed, while ``showsReactions`` is off
+    /// (043 R7).
+    public var playsReactionSounds = true
+    /// The format the next join uses, from Developer options (043 R11, R14).
+    public var membershipFormat: MatrixRTCMembershipFormat = .roomState
+    /// The codec the next join publishes video with, from Developer options (043 R15).
+    public var videoCodec: MatrixRTCVideoCodec = .auto
+    /// What Developer options offers for the codec: Auto, then what this device encodes (043 R15).
+    public var videoCodecs: [MatrixRTCVideoCodec] = [.auto]
     /// How loud the call's sound effects play, 0 to 1 of the call's level (037 R22).
     public var soundEffectsVolume: Float = 0.5
-    /// Whether the Preferences sheet is open. Closed by the screen when the call is minimised, enters
-    /// Picture in Picture or ends, since there is no room for it there (037 R12a).
-    public var isPreferencesPresented = false
+    /// The sheet open over the call, if any. Closed by the screen when the call is minimised, enters
+    /// Picture in Picture or ends, since there is no room for it there (037 R12a, 009 R27).
+    public var presentedSheet: ElementCallSheet?
     public var isScreenSharingEnabled = false
     /// Our hand as the user asked for it, from our own tile, which the core moves at once and
     /// keeps there until it lands or is refused (009 R5, 034 C12).
@@ -170,6 +187,50 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
         isSignallingReachable
     }
     
+    /// Sending needs a membership to relate the reaction to, and a homeserver to send it to.
+    public var isReactionControlEnabled: Bool {
+        isHandRaiseAvailable && isSignallingReachable
+    }
+    
+    /// What this call offers beyond mic, camera, audio and hang-up, in the menu's order.
+    public var extraActions: [ElementCallBarAction] {
+        var actions: [ElementCallBarAction] = []
+        if showsRaiseHandControl {
+            actions.append(.raisedHand)
+        }
+        if showsReactionControl {
+            actions.append(.reactions)
+        }
+        if isScreenSharingEnabled {
+            actions.append(.screenShare)
+        }
+        return actions
+    }
+    
+    /// The control before hang-up, if any. The bar keeps to five full-size controls (009 R17), so
+    /// what else the call offers goes behind `…`; design found six in a row busy. A single action
+    /// is its own button, since `…` over one entry is a tap for nothing.
+    public var barSlot: ElementCallBarSlot? {
+        let actions = extraActions
+        switch actions.count {
+        case 0: return nil
+        case 1: return .action(actions[0])
+        default: return .more
+        }
+    }
+    
+    /// While our hand is up, the bar says so and offers to lower it, since the control that raised
+    /// it is behind `…` (009 R2).
+    public var showsRaisedHandBanner: Bool {
+        showsRaiseHandControl && isHandRaised
+    }
+    
+    /// Reactions are for a group, under the hand's rule (009 R33): between two people a word does
+    /// the same. People rather than tiles, as for the hand.
+    public var showsReactionControl: Bool {
+        isHandRaiseAvailable && peopleCount >= 3
+    }
+    
     /// Starting a share needs our media server; stopping one never does, so a share in progress can
     /// always be ended.
     public var isScreenShareControlEnabled: Bool {
@@ -180,7 +241,12 @@ public nonisolated struct ElementCallScreenViewState: Equatable, Sendable {
     /// (009 R33). People rather than tiles, since a share is a second tile for one person. Unless
     /// our hand is already up from before: it must always be possible to lower it (009 R2).
     public var showsRaiseHandControl: Bool {
-        isHandRaiseAvailable && (tiles.count { !$0.isScreenShare } >= 3 || isHandRaised)
+        isHandRaiseAvailable && (peopleCount >= 3 || isHandRaised)
+    }
+    
+    /// A share is a second tile for one person, so it does not count.
+    private var peopleCount: Int {
+        tiles.count { !$0.isScreenShare }
     }
     
     /// False while minimized, in the bar or the system window: the tiles unmount so only the window decodes.
@@ -281,6 +347,45 @@ public nonisolated struct ElementCallReactionBubble: Identifiable, Equatable, Se
     }
 }
 
+/// What the call screen has open over it, one at a time: Preferences and More are system sheets, and
+/// the reaction picker is drawn over the call by the screen itself.
+/// What the control bar offers beyond its fixed four (`ElementCallScreenViewState.extraActions`).
+public nonisolated enum ElementCallBarAction: Sendable, Hashable {
+    case raisedHand
+    case reactions
+    case screenShare
+}
+
+/// What the control bar shows before hang-up (`ElementCallScreenViewState.barSlot`).
+public nonisolated enum ElementCallBarSlot: Sendable, Hashable {
+    /// The only extra action, as a button of its own.
+    case action(ElementCallBarAction)
+    /// `…`, opening the More sheet with every extra action.
+    case more
+}
+
+public nonisolated enum ElementCallSheet: Sendable, Hashable, Identifiable {
+    case preferences
+    /// Shown only with the host's developer mode (043 R4).
+    case developerOptions
+    /// The bar's `…`: what else the call offers.
+    case more
+    case reactions
+    
+    public var id: Self {
+        self
+    }
+    
+    /// The settings menu's sheets, which stay open across rotation and backgrounding, as settings
+    /// do; the others were opened for a moment that has passed (043 R5, 009 R27).
+    public var isSettings: Bool {
+        switch self {
+        case .preferences, .developerOptions: true
+        case .more, .reactions: false
+        }
+    }
+}
+
 public nonisolated enum ElementCallScreenViewAction: Sendable {
     case toggleMicrophone
     case toggleCamera
@@ -290,13 +395,19 @@ public nonisolated enum ElementCallScreenViewAction: Sendable {
     case toggleRaisedHand
     case selectAudioOutput(CallAudioOutput)
     case toggleTileStats
-    case showPreferences
-    case dismissPreferences
-    case setReactionsPreference(ElementCallReactionsPreference)
+    case present(ElementCallSheet)
+    case dismissSheet
+    case sendReaction(MatrixRTCReactionKind)
+    case setShowsReactions(Bool)
+    case setPlaysReactionSounds(Bool)
+    case setMembershipFormat(MatrixRTCMembershipFormat)
+    case setVideoCodec(MatrixRTCVideoCodec)
     case setSoundEffectsVolume(Float)
     /// The slider was let go: one short sound at the volume chosen (037 R24).
     case playSoundEffectsVolumeSample
     case minimize
     case hangUp
     case dismiss
+    /// The app's page in the system Settings, for a refused microphone or camera (042 R7, R11).
+    case openSettings
 }

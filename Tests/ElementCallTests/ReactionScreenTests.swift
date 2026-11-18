@@ -75,13 +75,13 @@ struct ReactionScreenTests {
     @Test
     func theSheetsChoicesAreKeptAndApplyToTheCallInProgress() async throws {
         let screen = try await Screen()
-        screen.viewModel.context.send(viewAction: .setReactionsPreference(.off))
+        screen.viewModel.context.send(viewAction: .setShowsReactions(false))
         screen.viewModel.context.send(viewAction: .setSoundEffectsVolume(0.3))
         
-        #expect(screen.preferences.reactions == .off)
+        #expect(!screen.preferences.showsReactions)
         #expect(screen.preferences.soundEffectsVolume == 0.3)
         #expect(screen.session.reactionsMode == .off)
-        try await waitUntil { screen.viewModel.context.viewState.reactionsPreference == .off }
+        try await waitUntil { !screen.viewModel.context.viewState.showsReactions }
         #expect(screen.viewModel.context.viewState.soundEffectsVolume == 0.3)
         
         screen.react(from: "BOB")
@@ -94,24 +94,24 @@ struct ReactionScreenTests {
     @Test
     func minimisingClosesTheSheetForGood() async throws {
         let screen = try await Screen()
-        screen.viewModel.context.send(viewAction: .showPreferences)
-        #expect(screen.viewModel.context.viewState.isPreferencesPresented)
+        screen.viewModel.context.send(viewAction: .present(.preferences))
+        #expect(screen.viewModel.context.viewState.presentedSheet == .preferences)
         
         screen.controller.setMaximized(false)
-        try await waitUntil { !screen.viewModel.context.viewState.isPreferencesPresented }
+        try await waitUntil { screen.viewModel.context.viewState.presentedSheet == nil }
         screen.controller.setMaximized(true)
         try await waitUntil { screen.viewModel.context.viewState.isMaximized }
-        #expect(!screen.viewModel.context.viewState.isPreferencesPresented)
+        #expect(screen.viewModel.context.viewState.presentedSheet == nil)
     }
     
     @Test
     func theCallEndingClosesTheSheet() async throws {
         let screen = try await Screen()
-        screen.viewModel.context.send(viewAction: .showPreferences)
+        screen.viewModel.context.send(viewAction: .present(.preferences))
         
         screen.controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
                                           room: screen.room, connection: .ended(.left))
-        try await waitUntil { !screen.viewModel.context.viewState.isPreferencesPresented }
+        try await waitUntil { screen.viewModel.context.viewState.presentedSheet == nil }
     }
     
     // MARK: - Support
@@ -152,7 +152,7 @@ struct ReactionScreenTests {
         let scripted: MatrixRTCScriptedSession
         let session: MatrixRTCMediaSession
         let room = Room()
-        let preferences = ElementCallFakePreferencesStore(reactions: .withoutSound)
+        let preferences = ElementCallFakePreferencesStore(playsReactionSounds: false)
         let controller: ElementCallController
         let viewModel: ElementCallScreenViewModel
         
@@ -168,7 +168,8 @@ struct ReactionScreenTests {
             scripted.push(roster: [.init(name: "BOB"), .init(name: "CAROL"), .init(name: "ME")])
             controller = ElementCallController(backend: ElementCallFakeMatrixBackend(),
                                                system: ElementCallFakeSystem(),
-                                               preferences: preferences)
+                                               preferences: preferences,
+                                               permissions: ElementCallFakeMediaPermissions())
             controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
                                        room: room, connection: .connected, call: session)
             viewModel = ElementCallScreenViewModel(controller: controller)

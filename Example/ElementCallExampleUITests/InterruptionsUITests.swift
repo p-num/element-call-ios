@@ -30,8 +30,17 @@ final class InterruptionsUITests: XCTestCase {
         app.otherElements["elementCall.interruptionsList"]
     }
     
-    private var handButton: XCUIElement {
-        app.buttons["elementCall.raisedHand"]
+    /// The hand is a row of the bar's `…` sheet, so whether it waits for our server is read from
+    /// there, and the sheet closed again before anything else is tapped.
+    private func handRowIsEnabled() -> Bool {
+        app.buttons["elementCall.controlsMore"].tap()
+        let row = app.buttons["elementCall.raisedHand"]
+        XCTAssertTrue(row.waitForExistence(timeout: 5), "the `…` opened the More sheet")
+        let isEnabled = row.isEnabled
+        app.buttons["elementCall.close"].tap()
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: row)
+        XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 5), .completed, "the sheet closed")
+        return isEnabled
     }
     
     /// `outage.homeserver.30s`: our server goes at 5 s and comes back at 35 s, on the wall clock,
@@ -41,7 +50,7 @@ final class InterruptionsUITests: XCTestCase {
         app.launch()
         
         XCTAssertTrue(indicator.waitForExistence(timeout: 20), "the indicator appears with the outage")
-        XCTAssertFalse(handButton.isEnabled, "the hand waits for our server (R15)")
+        XCTAssertFalse(handRowIsEnabled(), "the hand waits for our server (R15)")
         
         indicator.tap()
         XCTAssertTrue(list.waitForExistence(timeout: 5), "the tap reached the indicator and opened the list")
@@ -50,6 +59,6 @@ final class InterruptionsUITests: XCTestCase {
         let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: list)
         XCTAssertEqual(XCTWaiter().wait(for: [gone], timeout: 45), .completed, "the list closes on its own when the last entry clears (R36)")
         XCTAssertFalse(indicator.exists)
-        XCTAssertTrue(handButton.isEnabled)
+        XCTAssertTrue(handRowIsEnabled())
     }
 }

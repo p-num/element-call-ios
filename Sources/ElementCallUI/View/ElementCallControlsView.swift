@@ -21,13 +21,15 @@ struct ElementCallControlsView: View {
     @Environment(\.elementCallStyle) private var style
     var axis: Axis = .horizontal
     
-    /// The bar's thickness across the axis it runs along: a 56 pt button in 8 pt of capsule. The
-    /// same number either way round, which is what lets the stage reserve one clearance for both.
-    static let thickness: CGFloat = 56 + 2 * 8
+    /// Five fit the 375 pt side of the smallest phone at this size, and the bar never holds more
+    /// (`barSlot`). Six would need 44 pt, which design tried and found busy.
+    static let buttonSize: CGFloat = 56
     
-    /// Tighter up the rail than along the bar: five 56 pt buttons at 12 pt apart come to 344 pt,
-    /// which overflows the 375 pt short side of a phone and clipped the mic and the hang-up button
-    /// off both ends. Landscape has width to spare and no height at all.
+    /// The bar's thickness across the axis it runs along: a button in 8 pt of capsule. The same
+    /// number either way round, which is what lets the stage reserve one clearance for both.
+    static let thickness: CGFloat = buttonSize + 2 * 8
+    
+    /// Tighter up the rail than along the bar. Landscape has width to spare and no height at all.
     private var layout: AnyLayout {
         let spacing = Self.spacing(along: axis)
         return axis == .horizontal ? AnyLayout(HStackLayout(spacing: spacing)) : AnyLayout(VStackLayout(spacing: spacing))
@@ -37,14 +39,23 @@ struct ElementCallControlsView: View {
         axis == .horizontal ? 12 : 8
     }
     
-    /// End to end, capsule included. The design's answer to a bar that does not fit is a `…`
-    /// control opening a sheet of what overflowed, which is not built yet, so a test holds this to
-    /// what a phone can take instead (009 R17).
+    /// End to end, capsule included. Five controls is the most the bar holds: what else a call
+    /// offers goes behind `…` (009 R17, `barSlot`). A test holds the five to the smallest phone.
     static func length(controls count: Int, along axis: Axis) -> CGFloat {
-        CGFloat(count) * 56 + CGFloat(count - 1) * spacing(along: axis) + 2 * 8
+        CGFloat(count) * buttonSize + CGFloat(count - 1) * spacing(along: axis) + 2 * 8
     }
     
     var body: some View {
+        buttons
+            .padding(8)
+            // The bar is the glass (R46) and the buttons sit on it with their own fills: design's
+            // decision after seeing the three shapes on a phone. Glass on glass flattens the inner
+            // shapes and a union loses their states, so the buttons are not glass here; the top
+            // bar's buttons and the spotlight's arrows, which have no bar, are.
+            .elementCallGlass(in: Capsule(), fallback: style.theme.bgCanvasDefaultLevel.opacity(0.9))
+    }
+    
+    private var buttons: some View {
         layout {
             controlButton(icon: context.viewState.isMicrophoneMuted ? .micOff : .micOn,
                           isActive: !context.viewState.isMicrophoneMuted,
@@ -57,34 +68,20 @@ struct ElementCallControlsView: View {
                 context.send(viewAction: .toggleCamera)
             }
             audioRouteButton
-            if context.viewState.showsRaiseHandControl {
-                raisedHandButton
-            }
-            if context.viewState.isScreenSharingEnabled {
-                controlButton(icon: .shareScreen,
-                              isActive: !context.viewState.isScreenSharing,
-                              isEnabled: context.viewState.isScreenShareControlEnabled,
-                              label: context.viewState.isScreenSharing ? L10n.a11yStopScreenShare : L10n.a11yStartScreenShare) {
-                    context.send(viewAction: .toggleScreenShare)
-                }
+            if let slot = context.viewState.barSlot {
+                slotButton(slot)
             }
             Button {
                 context.send(viewAction: .hangUp)
             } label: {
                 style.icons.icon(.endCall)
                     .foregroundStyle(.white)
-                    .frame(width: 56, height: 56)
+                    .frame(width: Self.buttonSize, height: Self.buttonSize)
                     .background(style.theme.bgCriticalPrimary, in: Circle())
             }
             .accessibilityLabel(L10n.a11yHangUp)
             .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.hangUp)
         }
-        .padding(8)
-        // The bar is the glass (R46) and the buttons sit on it with their own fills: design's
-        // decision after seeing the three shapes on a phone. Glass on glass flattens the inner
-        // shapes and a union loses their states, so the buttons are not glass here; the top bar's
-        // buttons and the spotlight's arrows, which have no bar, are.
-        .elementCallGlass(in: Capsule(), fallback: style.theme.bgCanvasDefaultLevel.opacity(0.9))
     }
     
     /// With only the phone's own outputs, a speaker toggle. With a headset, a menu of every output.
@@ -137,6 +134,51 @@ struct ElementCallControlsView: View {
         .accessibilityValue(state.isHandControlEnabled ? state.isHandRaised ? L10n.a11yHandRaisedState : "" : L10n.a11yUnavailable)
         // The same identifier `controlButton` would derive, set here because this one is built by hand.
         .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.control(for: .raisedHand))
+    }
+    
+    /// See `barSlot`.
+    @ViewBuilder
+    private func slotButton(_ slot: ElementCallBarSlot) -> some View {
+        switch slot {
+        case .more:
+            // A sheet, not a menu. An iOS 26 menu lifts the whole bar into its own overlay and puts
+            // it back as it closes, drawn over everything: the reaction picker opened from one had
+            // the bar flash over it, however long it waited. Its identifier is set by hand: the
+            // one `control(for: .overflow)` derives is the top bar's.
+            Button {
+                context.send(viewAction: .present(.more))
+            } label: {
+                controlCircle(icon: .overflow, isActive: true)
+            }
+            .accessibilityLabel(L10n.a11yMoreOptions)
+            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.controlsMore)
+        case .action(let action):
+            actionButton(action)
+        }
+    }
+    
+    /// The one extra action a call offers, as a button of its own.
+    @ViewBuilder
+    private func actionButton(_ action: ElementCallBarAction) -> some View {
+        let state = context.viewState
+        switch action {
+        case .raisedHand:
+            raisedHandButton
+        case .reactions:
+            controlButton(icon: .reaction,
+                          isActive: true,
+                          isEnabled: state.isReactionControlEnabled,
+                          label: L10n.a11ySendReaction) {
+                context.send(viewAction: .present(.reactions))
+            }
+        case .screenShare:
+            controlButton(icon: .shareScreen,
+                          isActive: !state.isScreenSharing,
+                          isEnabled: state.isScreenShareControlEnabled,
+                          label: state.isScreenSharing ? L10n.a11yStopScreenShare : L10n.a11yStartScreenShare) {
+                context.send(viewAction: .toggleScreenShare)
+            }
+        }
     }
     
     /// The earpiece is the resting state; anything else, speaker, headset or car, is highlighted,
@@ -207,7 +249,7 @@ struct ElementCallControlsView: View {
         let isHighlighted = !isActive && isEnabled
         return style.icons.icon(icon)
             .foregroundStyle(!isEnabled ? style.theme.iconQuaternary : isHighlighted ? style.theme.iconOnSolidPrimary : style.theme.iconPrimary)
-            .frame(width: 56, height: 56)
+            .frame(width: Self.buttonSize, height: Self.buttonSize)
             .background(isHighlighted ? style.theme.bgActionPrimaryRest : style.theme.bgSubtleSecondary, in: Circle())
     }
 }
@@ -245,13 +287,17 @@ struct ElementCallControlsView_Previews: PreviewProvider, TestablePreview {
             .environment(\.colorScheme, .dark)
     }
     
-    /// Our server and our media server both away: hand and share disabled, the rest untouched.
+    /// Our server and our media server both away: hand and reactions disabled, the rest untouched.
     static var interruptedState: ElementCallScreenViewState {
         var state = ElementCallPreviewFixtures.connected(tiles: ElementCallPreviewFixtures.group)
-        state.isScreenSharingEnabled = true
         state.isSignallingReachable = false
         state.isOwnMediaReconnecting = true
         return state
+    }
+    
+    /// Two people and screen share: the one extra action has the slot itself.
+    static var oneToOneShareState: ElementCallScreenViewState {
+        ElementCallPreviewFixtures.connected(tiles: Array(ElementCallPreviewFixtures.group.prefix(2)), isScreenSharingEnabled: true)
     }
     
     static func handState(isRaised: Bool) -> ElementCallScreenViewState {
@@ -276,5 +322,7 @@ struct ElementCallControlsView_Previews: PreviewProvider, TestablePreview {
             .previewDisplayName("Hand raised")
         controls(interruptedState)
             .previewDisplayName("Interrupted")
+        controls(oneToOneShareState)
+            .previewDisplayName("One to one with screen share")
     }
 }

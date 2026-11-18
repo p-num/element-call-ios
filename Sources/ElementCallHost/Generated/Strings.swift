@@ -84,6 +84,14 @@ package nonisolated enum L10n {
   package static var a11yReturnToCallIos: String { ElementCallLocalization.string("Localizable", "element_call_a11y_return_to_call_ios") }
   /// Selected
   package static var a11ySelected: String { ElementCallLocalization.string("Localizable", "element_call_a11y_selected") }
+  /// Send a reaction
+  package static var a11ySendReaction: String { ElementCallLocalization.string("Localizable", "element_call_a11y_send_reaction") }
+  /// Send reaction %1$@
+  package static func a11ySendReactionEmoji(_ p1: Any) -> String {
+    ElementCallLocalization.string("Localizable", "element_call_a11y_send_reaction_emoji", String(describing: p1))
+  }
+  /// Settings
+  package static var a11ySettings: String { ElementCallLocalization.string("Localizable", "element_call_a11y_settings") }
   /// Sharing their screen
   package static var a11ySharingScreen: String { ElementCallLocalization.string("Localizable", "element_call_a11y_sharing_screen") }
   /// Speaking
@@ -104,8 +112,12 @@ package nonisolated enum L10n {
   package static var a11yUnmuteMicrophone: String { ElementCallLocalization.string("Localizable", "element_call_a11y_unmute_microphone") }
   /// Back
   package static var actionBack: String { ElementCallLocalization.string("Localizable", "element_call_action_back") }
+  /// Cancel
+  package static var actionCancel: String { ElementCallLocalization.string("Localizable", "element_call_action_cancel") }
   /// Close
   package static var actionClose: String { ElementCallLocalization.string("Localizable", "element_call_action_close") }
+  /// Open settings
+  package static var actionOpenSettings: String { ElementCallLocalization.string("Localizable", "element_call_action_open_settings") }
   /// Return
   package static var actionReturnIos: String { ElementCallLocalization.string("Localizable", "element_call_action_return_ios") }
   /// Stop
@@ -134,6 +146,24 @@ package nonisolated enum L10n {
   package static var calling: String { ElementCallLocalization.string("Localizable", "element_call_calling") }
   /// Connecting…
   package static var connecting: String { ElementCallLocalization.string("Localizable", "element_call_connecting") }
+  /// Membership format
+  package static var developerOptionsMembershipFormat: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_membership_format") }
+  /// MSC
+  package static var developerOptionsMembershipFormatMsc: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_membership_format_msc") }
+  /// Room state
+  package static var developerOptionsMembershipFormatRoomState: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_membership_format_room_state") }
+  /// Takes effect the next time you join a call.
+  package static var developerOptionsNextJoin: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_next_join") }
+  /// Video codec
+  package static var developerOptionsVideoCodec: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_video_codec") }
+  /// Auto (%1$@)
+  package static func developerOptionsVideoCodecAuto(_ p1: Any) -> String {
+    ElementCallLocalization.string("Localizable", "element_call_developer_options_video_codec_auto", String(describing: p1))
+  }
+  /// Takes effect the next time you join a call. Anyone whose app can’t decode it won’t see your video.
+  package static var developerOptionsVideoCodecDescription: String { ElementCallLocalization.string("Localizable", "element_call_developer_options_video_codec_description") }
+  /// Emoji reactions
+  package static var emojiReactions: String { ElementCallLocalization.string("Localizable", "element_call_emoji_reactions") }
   /// Error
   package static var error: String { ElementCallLocalization.string("Localizable", "element_call_error") }
   /// Couldn’t connect
@@ -148,14 +178,20 @@ package nonisolated enum L10n {
   package static var failureConnectionRefused: String { ElementCallLocalization.string("Localizable", "element_call_failure_connection_refused") }
   /// Couldn’t join the call
   package static var failureJoinFailedTitle: String { ElementCallLocalization.string("Localizable", "element_call_failure_join_failed_title") }
+  /// This call used the MSC membership format, which your server may not support.
+  package static var failureJoinMembershipFormat: String { ElementCallLocalization.string("Localizable", "element_call_failure_join_membership_format") }
   /// Your server refused to let you join.
   package static var failureJoinRefused: String { ElementCallLocalization.string("Localizable", "element_call_failure_join_refused") }
   /// Your server didn’t respond in time.
   package static var failureJoinTimedOut: String { ElementCallLocalization.string("Localizable", "element_call_failure_join_timed_out") }
+  /// Use Room state
+  package static var failureUseRoomState: String { ElementCallLocalization.string("Localizable", "element_call_failure_use_room_state") }
   /// Your hand could not be lowered.
   package static var handLowerFailed: String { ElementCallLocalization.string("Localizable", "element_call_hand_lower_failed") }
   /// Your hand could not be raised.
   package static var handRaiseFailed: String { ElementCallLocalization.string("Localizable", "element_call_hand_raise_failed") }
+  /// Your hand is raised
+  package static var handRaisedBanner: String { ElementCallLocalization.string("Localizable", "element_call_hand_raised_banner") }
   /// %1$d of %2$d
   package static func heroPosition(_ p1: Int, _ p2: Int) -> String {
     ElementCallLocalization.string("Localizable", "element_call_hero_position", p1, p2)
@@ -174,8 +210,20 @@ package nonisolated enum L10n {
   package static var interruptionsResolved: String { ElementCallLocalization.string("Localizable", "element_call_interruptions_resolved") }
   /// Joining…
   package static var joining: String { ElementCallLocalization.string("Localizable", "element_call_joining") }
+  /// Lower hand
+  package static var lowerHand: String { ElementCallLocalization.string("Localizable", "element_call_lower_hand") }
+  /// More options
+  package static var moreTitle: String { ElementCallLocalization.string("Localizable", "element_call_more_title") }
   /// OK
   package static var ok: String { ElementCallLocalization.string("Localizable", "element_call_ok") }
+  /// Allow access to the camera in settings to turn it on.
+  package static var permissionCameraDescription: String { ElementCallLocalization.string("Localizable", "element_call_permission_camera_description") }
+  /// Camera not allowed
+  package static var permissionCameraTitle: String { ElementCallLocalization.string("Localizable", "element_call_permission_camera_title") }
+  /// Allow access to the microphone in settings, then start the call again.
+  package static var permissionMicrophoneDescription: String { ElementCallLocalization.string("Localizable", "element_call_permission_microphone_description") }
+  /// Microphone needed
+  package static var permissionMicrophoneTitle: String { ElementCallLocalization.string("Localizable", "element_call_permission_microphone_title") }
   /// About
   package static var preferencesAbout: String { ElementCallLocalization.string("Localizable", "element_call_preferences_about") }
   /// matrix-rust-rtc %1$@
@@ -192,8 +240,14 @@ package nonisolated enum L10n {
   package static var preferencesReactionsOn: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_on") }
   /// Show reactions
   package static var preferencesReactionsShow: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_show") }
+  /// Show an animation when anyone sends a reaction.
+  package static var preferencesReactionsShowDescription: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_show_description") }
   /// Silent
   package static var preferencesReactionsSilent: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_silent") }
+  /// Play reaction sounds
+  package static var preferencesReactionsSounds: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_sounds") }
+  /// Play a sound effect when anyone sends a reaction.
+  package static var preferencesReactionsSoundsDescription: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_sounds_description") }
   /// Reactions
   package static var preferencesReactionsTitle: String { ElementCallLocalization.string("Localizable", "element_call_preferences_reactions_title") }
   /// Sound effects
@@ -210,8 +264,18 @@ package nonisolated enum L10n {
   package static func preferencesVersion(_ p1: Any) -> String {
     ElementCallLocalization.string("Localizable", "element_call_preferences_version", String(describing: p1))
   }
+  /// Raise hand
+  package static var raiseHand: String { ElementCallLocalization.string("Localizable", "element_call_raise_hand") }
+  /// Reactions
+  package static var reactionsTitle: String { ElementCallLocalization.string("Localizable", "element_call_reactions_title") }
   /// The other person could not be called
   package static var ringNotSent: String { ElementCallLocalization.string("Localizable", "element_call_ring_not_sent") }
+  /// Could not start screen sharing
+  package static var screenShareFailed: String { ElementCallLocalization.string("Localizable", "element_call_screen_share_failed") }
+  /// Share screen
+  package static var screenShareStart: String { ElementCallLocalization.string("Localizable", "element_call_screen_share_start") }
+  /// Stop sharing screen
+  package static var screenShareStop: String { ElementCallLocalization.string("Localizable", "element_call_screen_share_stop") }
   /// %1$@’s screen
   package static func sharedScreenName(_ p1: Any) -> String {
     ElementCallLocalization.string("Localizable", "element_call_shared_screen_name", String(describing: p1))

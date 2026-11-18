@@ -90,6 +90,10 @@ public nonisolated struct ElementCallTokenTheme: ElementCallThemeProtocol {
         colors.textCriticalPrimary
     }
     
+    public var textDisabled: Color {
+        colors.textDisabled
+    }
+    
     public var borderSuccessSubtle: Color {
         colors.borderSuccessSubtle
     }
@@ -142,13 +146,17 @@ public nonisolated struct ElementCallTokenIcons: ElementCallIconRenderingProtoco
         // Compound has no Bluetooth glyph yet; design is drawing one.
         case .bluetooth: icons.headphonesSolid
         case .raisedHand: icons.raisedHandSolid
+        case .reaction: icons.reactionSolid
         case .userProfile: icons.userProfileSolid
         case .overflow: icons.overflowHorizontal
         case .preferences: icons.preferences
+        case .settings: icons.settingsSolid
+        case .developerOptions: icons.advancedSettings
         case .collapse: icons.collapse
         case .info: icons.infoSolid
         case .chevronRight: icons.chevronRight
         case .close: icons.close
+        case .check: icons.check
         case .error: icons.errorSolid
         case .spinner: icons.spinner
         case .keyOff: icons.keyOffSolid

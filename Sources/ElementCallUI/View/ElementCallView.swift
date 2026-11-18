@@ -18,6 +18,7 @@ struct ElementCallView: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityVoiceOverEnabled) private var voiceOverEnabled
     @Environment(\.elementCallChromeReturnDelay) private var chromeReturnDelay
+    @Environment(\.scenePhase) private var scenePhase
     @Bindable var context: ElementCallScreenContext
     /// Measured while drawn and kept while not, so the clearance it reserves can change in the same
     /// transaction as the chrome rather than a layout pass later. Started at what they measure at
@@ -47,7 +48,9 @@ struct ElementCallView: View {
                 // A failed call is over: its screen says why and offers the way out, and nothing
                 // of the call is left to draw (034 R27).
                 if case .failed(let failure) = context.viewState.connection {
-                    ElementCallFailureView(failure: failure) { context.send(viewAction: .hangUp) }
+                    ElementCallFailureView(failure: failure,
+                                           primaryAction: Self.primaryAction(for: failure) { context.send(viewAction: $0) },
+                                           onClose: { context.send(viewAction: .hangUp) })
                 } else if context.viewState.isMaximized {
                     // Minimized (bar or Picture in Picture): nothing mounted, so the tiles' streams
                     // close and only the window's own slot keeps decoding.
@@ -114,6 +117,19 @@ struct ElementCallView: View {
                                          reduceMotion: reduceMotion)
                             .zIndex(2)
                     }
+                    
+                    // Over everything, the full-screen controls included, since it is opened from
+                    // either bar (009 R30). Two views so each has its own transition: a transition
+                    // applies only to the view inserted, never to its children, and the card should
+                    // rise from the edge while the call behind it only darkens.
+                    if context.viewState.presentedSheet == .reactions {
+                        ElementCallReactionPickerScrim(context: context)
+                            .transition(.opacity)
+                            .zIndex(4)
+                        ElementCallReactionPicker(context: context)
+                            .transition(reduceMotion ? .opacity : .move(edge: .bottom))
+                            .zIndex(5)
+                    }
                 } else {
                     Color.clear
                         .onAppear(perform: declareMinimizedDetailWindow)
@@ -123,11 +139,14 @@ struct ElementCallView: View {
             .animation(.easeInOut(duration: 0.25), value: context.viewState.isScreenSharing)
             .animation(.easeInOut(duration: 0.3), value: isStageShown)
             .animation(.easeInOut(duration: 0.3), value: context.viewState.isRinging)
+            .animation(reduceMotion ? .easeInOut(duration: 0.2) : .spring(duration: 0.35, bounce: 0.1),
+                       value: context.viewState.presentedSheet == .reactions)
             .frame(width: geometry.size.width, height: geometry.size.height)
             // In landscape the status bar goes with the chrome; in portrait it stays (R8, R9).
             .statusBarHidden(fullscreenTile != nil ? !context.isFullscreenChromeVisible : isTopBarHideable(isLandscape: isLandscape) && !isStageChromeVisible)
             .onChange(of: isLandscape) { _, isLandscape in
                 applyStageChrome(.rotated(isLandscape: isLandscape))
+                closeReactionsSheet()
             }
             // Announced as it comes and goes, never per entry, so an outage is one sentence rather
             // than a burst (034 R40).
@@ -143,19 +162,25 @@ struct ElementCallView: View {
             }
         }
         .environment(\.colorScheme, .dark)
-        .sheet(isPresented: Binding(get: { context.viewState.isPreferencesPresented },
-                                    set: {
-                                        if !$0 {
-                                            context.send(viewAction: .dismissPreferences)
-                                        }
-                                    })) {
-            ElementCallPreferencesSheet(context: context)
-                // A sheet is a presentation of its own, which takes the window's appearance rather
-                // than the call's: without this it came up light over the dark call on a phone in
-                // light mode. The environment value covers its content and the preference its
-                // container, glass and all.
-                .environment(\.colorScheme, .dark)
-                .preferredColorScheme(.dark)
+        .onChange(of: scenePhase) { _, phase in
+            if phase == .background {
+                closeReactionsSheet()
+            }
+        }
+        .sheet(item: presentedSheet) { sheet in
+            Group {
+                switch sheet {
+                case .preferences: ElementCallPreferencesSheet(context: context)
+                case .developerOptions: ElementCallDeveloperOptionsSheet(context: context)
+                case .more, .reactions: ElementCallMoreSheet(context: context)
+                }
+            }
+            // A sheet is a presentation of its own, which takes the window's appearance rather
+            // than the call's: without this it came up light over the dark call on a phone in
+            // light mode. The environment value covers its content and the preference its
+            // container, glass and all.
+            .environment(\.colorScheme, .dark)
+            .preferredColorScheme(.dark)
         }
         .alert(context.alertInfo?.title ?? "",
                isPresented: Binding(get: { context.alertInfo != nil },
@@ -164,8 +189,17 @@ struct ElementCallView: View {
                                             context.alertInfo = nil
                                         }
                                     }),
-               presenting: context.alertInfo) { _ in
-            Button(L10n.ok) { context.alertInfo = nil }
+               presenting: context.alertInfo) { alert in
+            switch alert.action {
+            case .openSettings:
+                Button(L10n.actionOpenSettings) {
+                    context.alertInfo = nil
+                    context.send(viewAction: .openSettings)
+                }
+                Button(L10n.actionCancel, role: .cancel) { context.alertInfo = nil }
+            case nil:
+                Button(L10n.ok) { context.alertInfo = nil }
+            }
         } message: { alert in
             Text(alert.message)
         }
@@ -285,6 +319,29 @@ struct ElementCallView: View {
     
     /// Assigned only on a change: the context is observed, and the scroll reports a direction many
     /// times a second while the answer stays the same.
+    /// The system sheets. The picker is not one of them: it is drawn over the call, so More hands
+    /// over to it by its sheet going down as the picker comes up.
+    private var presentedSheet: Binding<ElementCallSheet?> {
+        Binding {
+            context.viewState.presentedSheet == .reactions ? nil : context.viewState.presentedSheet
+        } set: { sheet in
+            // Only a swipe down closes the state: the sheet also goes when More hands over to the
+            // picker, which must not close the picker with it.
+            if sheet == nil, context.viewState.presentedSheet != .reactions {
+                context.send(viewAction: .dismissSheet)
+            }
+        }
+    }
+    
+    /// The picker closes when the phone turns or the app goes to the background, and does not come
+    /// back: it was opened for a moment that has passed (009 R27). The settings sheets stay, being
+    /// settings (037 R12a, 043 R5).
+    private func closeReactionsSheet() {
+        if let sheet = context.viewState.presentedSheet, !sheet.isSettings {
+            context.send(viewAction: .dismissSheet)
+        }
+    }
+    
     private func applyStageChrome(_ event: ElementCallChromeVisibility.Event) {
         var chrome = context.stageChrome
         chrome.apply(event)
@@ -443,24 +500,54 @@ struct ElementCallView: View {
             
             Spacer()
             
-            // One way in to the Preferences sheet, which holds the settings, the developer options
-            // and the versions (037 R12, R16, R17). The developer options and the version used to be
-            // here, unlocalised; a sheet has room to say what each does, and grows without the menu
-            // turning into a list of switches.
+            // The settings menu: every item opens a sheet of its own (043 R5). Entries the design has
+            // to come go above these two, which always end the menu (R3), and Developer options is
+            // offered only with the host's developer mode (R4).
             Menu {
-                Button { context.send(viewAction: .showPreferences) } label: {
+                Button { context.send(viewAction: .present(.preferences)) } label: {
                     Label { Text(L10n.preferencesTitle) } icon: { style.icons.icon(.preferences) }
                 }
                 .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.preferences)
+                if context.viewState.isDeveloperModeEnabled {
+                    Button { context.send(viewAction: .present(.developerOptions)) } label: {
+                        Label { Text(L10n.preferencesDeveloperOptions) } icon: { style.icons.icon(.developerOptions) }
+                    }
+                    .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.developerOptions)
+                }
             } label: {
-                style.icons.icon(.overflow)
+                style.icons.icon(.settings)
             }
             .buttonStyle(ElementCallRoundButtonStyle())
             // Applied here rather than through `control(for:)`, which only the control bar calls.
             // The constant existed and was pinned by name in the identifier tests, but reached no
             // view, so nothing could find this button — including the UI test that reads the menu.
-            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.more)
-            .accessibilityLabel(L10n.a11yMoreOptions)
+            .accessibilityIdentifier(ElementCallAccessibilityIdentifiers.settings)
+            .accessibilityLabel(L10n.a11ySettings)
+        }
+    }
+    
+    /// The fix a failure offers beside Close. Each ends the call as Close does: it has failed, and
+    /// the user starts it again.
+    /// - Open settings, for a refused microphone; the user starts again after a grant (042 C2, C7).
+    /// - Use Room state, for an MSC join that failed: the format is only reachable from inside a
+    ///   call, so without this a stored MSC would fail every join and leave no way back (043 R18a).
+    static func primaryAction(for failure: ElementCallFailure,
+                              send: @escaping (ElementCallScreenViewAction) -> Void) -> ElementCallFailureView.PrimaryAction? {
+        switch failure {
+        case .microphoneRefused:
+            ElementCallFailureView.PrimaryAction(title: L10n.actionOpenSettings,
+                                                 identifier: ElementCallAccessibilityIdentifiers.failureOpenSettings) {
+                send(.openSettings)
+                send(.hangUp)
+            }
+        case .mscJoinFailed:
+            ElementCallFailureView.PrimaryAction(title: L10n.failureUseRoomState,
+                                                 identifier: ElementCallAccessibilityIdentifiers.failureUseRoomState) {
+                send(.setMembershipFormat(.roomState))
+                send(.hangUp)
+            }
+        default:
+            nil
         }
     }
     

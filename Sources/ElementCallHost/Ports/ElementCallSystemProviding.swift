@@ -54,6 +54,10 @@ public protocol ElementCallSystemProvidingProtocol: AnyObject {
     func reportDisconnected(roomID: String)
     /// Only ``ElementCallEndReason/local`` is ours to end: the system should hear every other reason
     /// as the call ending on its own, not as us hanging up (spec 030 R32).
+    ///
+    /// Can come without a ``startCall(roomID:displayName:isVideo:)`` when the call stopped at the
+    /// microphone permission (042). End the ringing call answered for this room, if there is one,
+    /// and otherwise ignore it.
     func endCall(roomID: String, reason: ElementCallEndReason)
     /// Mirrors our mute state into the system call UI.
     func setMicrophoneEnabled(_ enabled: Bool, roomID: String)

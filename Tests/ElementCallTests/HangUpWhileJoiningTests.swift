@@ -5,8 +5,9 @@
 // Please see LICENSE files in the repository root for full details.
 //
 
+// `@testable` for the controller's clock.
 import Combine
-import ElementCallHost
+@testable import ElementCallHost
 import ElementCallKit
 import Foundation
 import Testing
@@ -15,8 +16,9 @@ import Testing
 /// tests get from `ElementCallFakeMatrixBackend`, and the one place a hang-up can land while the
 /// join is still waiting for its room.
 ///
-/// Every test hangs up what it started and waits for the join to unwind. A call left joining fails
-/// when the core stops waiting for its room, 30 seconds on, in whichever test is running by then.
+/// Every test hangs up what it started and waits for the join to unwind. The wait for the room is
+/// timed on a clock that never moves, so however slow the runner, the hang-up lands before the
+/// 30 seconds after which the join would give up on the room and fail.
 @Suite("Hanging up while joining")
 @MainActor
 struct HangUpWhileJoiningTests {
@@ -81,6 +83,30 @@ struct HangUpWhileJoiningTests {
                                        .end(roomID: second.roomID, reason: .local)])
     }
     
+    /// A second hang-up before the first had finished ran the teardown again, by when a host
+    /// starting the next call on `.ended` had started it, so the second teardown ended that call.
+    @Test("Hanging up twice ends the call once and leaves the next call alone")
+    func hangingUpTwiceLeavesTheNextCallAlone() async throws {
+        let fixture = Fixture()
+        fixture.recorder.onEnded = { [controller = fixture.controller, callData, second] in
+            controller.reset()
+            controller.startCall(callData, room: second)
+        }
+        fixture.controller.startCall(callData, room: first)
+        try await fixture.waitForTheRoom(first)
+        
+        fixture.controller.hangUp()
+        try await fixture.hangUp(first)
+        try await fixture.waitForTheRoom(second)
+        
+        #expect(fixture.controller.connection == .joining)
+        #expect(fixture.controller.room?.roomID == second.roomID)
+        #expect(fixture.recorder.endedCount == 1)
+        #expect(fixture.systemEnds == [.end(roomID: first.roomID, reason: .local)])
+        
+        try await fixture.hangUp(second)
+    }
+    
     // MARK: - Helpers
     
     private final class Fixture {
@@ -96,7 +122,9 @@ struct HangUpWhileJoiningTests {
                                                    system: system,
                                                    options: ElementCallOptions(),
                                                    style: .stock,
-                                                   logger: logger)
+                                                   logger: logger,
+                                                   permissions: ElementCallFakeMediaPermissions())
+            controller.clock = MatrixRTCManualClock()
             self.system = system
             self.logger = logger
             self.controller = controller

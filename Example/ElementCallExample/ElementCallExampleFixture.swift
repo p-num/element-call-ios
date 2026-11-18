@@ -44,6 +44,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
     case smallFive = "small_five"
     case oneToOneSpeaking = "one_to_one_speaking"
     case reactions
+    case shareEnabled = "share_enabled"
+    case oneToOneShareEnabled = "one_to_one_share_enabled"
     case joining
     case connectingMedia = "connecting_media"
     case failed
@@ -61,6 +63,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
     case outagePeerSFU1m = "outage.peer_sfu.1m"
     case outageKeyUndeliveredThenDelivered = "outage.key.undelivered_then_delivered"
     case outageKeyMissing = "outage.key.missing"
+    case permissionProbe = "permission_probe"
     
     /// `-fixture <key>` opens a fixture and `-scenario <name>` a scenario file, mirroring Android's
     /// `--es fixture` and `--es scenario` so one recipe reads the same on both.
@@ -74,6 +77,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case connecting = "Connecting"
         case ringing = "Ringing"
         case outages = "Outages"
+        case permissions = "Permissions"
     }
     
     var category: Category {
@@ -82,6 +86,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .ringingPickup, .ringingVoicePickup, .ringingDeclined, .ringingUnanswered: .ringing
         case .outageHomeserver30s, .outageHomeserverLapse, .outageOwnSFURecovers40s, .outageOwnSFUBudget, .outagePeerSFU1m,
              .outageKeyUndeliveredThenDelivered, .outageKeyMissing: .outages
+        case .permissionProbe: .permissions
         default: .connected
         }
     }
@@ -110,6 +115,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallFive: "Small call of five"
         case .oneToOneSpeaking: "One to one, speaking"
         case .reactions: "Reactions"
+        case .shareEnabled: "Screen share enabled"
+        case .oneToOneShareEnabled: "One to one, screen share enabled"
         case .ringingPickup: "Ringing, then picked up"
         case .ringingVoicePickup: "Ringing a voice call, then picked up"
         case .ringingDeclined: "Ringing, then declined"
@@ -125,6 +132,7 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .outagePeerSFU1m: "Carol and Bob's media server away for 1 min"
         case .outageKeyUndeliveredThenDelivered: "Erin's key late, then delivered"
         case .outageKeyMissing: "Erin's key never arrives"
+        case .permissionProbe: "Microphone and camera permissions"
         }
     }
     
@@ -149,6 +157,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .smallFour: "Two by two, Carol speaking; Dan's camera off. Three hands up, ours included."
         case .smallFive: "Two rows of two and one centred; two rows in landscape."
         case .oneToOneSpeaking: "A voice call: the sound waves come and go round Bob's avatar as he speaks."
+        case .shareEnabled: "The host enables screen share: the bar's `…` sheet adds Share screen to the hand and reactions."
+        case .oneToOneShareEnabled: "The host enables screen share; no hand or reactions one to one, so Share screen has the button."
         case .reactions: "Reactions rising and sounding on a loop, then four claps at once; -reactionInterval for a stream."
         case .ringingPickup: "The ringing screen and ringback; Bob answers with video at 6 s."
         case .ringingVoicePickup: "A voice call ringing; Bob answers without video at 6 s."
@@ -165,7 +175,24 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case .outagePeerSFU1m: "From 5 s Carol and Bob are avatars with a spinner, until 65 s."
         case .outageKeyUndeliveredThenDelivered: "From 5 s Erin's key is missing, until 12 s: her spinner, and no indicator."
         case .outageKeyMissing: "From 5 s Erin's key is missing: her spinner, the key-off icon from 15 s, and no indicator."
+        case .permissionProbe: "A video call with Bob through the real controller, so the system's dialogs appear (042)."
         }
+    }
+    
+    /// What the catalogue shows under the row: for the probe, the current authorization, read
+    /// afresh each time the list is drawn (fixtures.md, "Permissions").
+    @MainActor
+    var catalogueDetail: String {
+        guard self == .permissionProbe else { return detail }
+        let permissions = ElementCallSystemMediaPermissions()
+        func describe(_ permission: ElementCallMediaPermission) -> String {
+            switch permission {
+            case .notAsked: "never asked"
+            case .refused: "refused"
+            case .granted: "allowed"
+            }
+        }
+        return "Microphone: \(describe(permissions.permission(for: .microphone))) · Camera: \(describe(permissions.permission(for: .camera)))"
     }
     
     /// Android draws the video call as its floating tile and the voice call as its bar; iOS has
@@ -188,6 +215,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
         case outage(ElementCallExampleOutage)
         /// A small call on a scripted call, with reactions arriving on a loop.
         case reactions(ElementCallExampleReactions)
+        /// A video call with Bob through the real controller and the system's permissions (042).
+        case permissionProbe
     }
     
     /// Built from the same fixtures the snapshots use, so a failure here and a failure there are
@@ -278,6 +307,13 @@ enum ElementCallExampleFixture: String, CaseIterable {
             return .played(scenario: frames.joined(separator: "\n"))
         case .reactions:
             return .reactions(ElementCallExampleReactions())
+        // A host option every other fixture leaves off. Starting a share only lights the control:
+        // there is no capture here to make a tile of.
+        case .shareEnabled:
+            return Self.connected([me, Fixtures.tile("Carol", hasVideo: true), Fixtures.tile("Bob", hasVideo: true)],
+                                  isScreenSharingEnabled: true)
+        case .oneToOneShareEnabled:
+            return Self.connected([me, Fixtures.tile("Bob", hasVideo: true)], isDirect: true, isScreenSharingEnabled: true)
         case .ringingPickup:
             return .ringing(ElementCallExampleRinging(isAudioCall: false, outcome: .pickUp))
         case .ringingVoicePickup:
@@ -300,6 +336,8 @@ enum ElementCallExampleFixture: String, CaseIterable {
             return .outage(.keyUndeliveredThenDelivered)
         case .outageKeyMissing:
             return .outage(.keyMissing)
+        case .permissionProbe:
+            return .permissionProbe
         case .joining:
             return .connecting(.joining)
         case .connectingMedia:
@@ -314,11 +352,12 @@ enum ElementCallExampleFixture: String, CaseIterable {
     /// The controls start where our own tile is, so the first tap on the camera or the microphone
     /// turns it the other way rather than lighting a button our tile already agreed with.
     @MainActor
-    private static func connected(_ tiles: [ElementCallTile], isDirect: Bool = false) -> Kind {
+    private static func connected(_ tiles: [ElementCallTile], isDirect: Bool = false, isScreenSharingEnabled: Bool = false) -> Kind {
         let own = tiles.first { $0.isLocal }
         var state = ElementCallPreviewFixtures.connected(tiles: tiles,
                                                          isDirect: isDirect,
-                                                         isMicrophoneMuted: own?.isMicrophoneMuted ?? false)
+                                                         isMicrophoneMuted: own?.isMicrophoneMuted ?? false,
+                                                         isScreenSharingEnabled: isScreenSharingEnabled)
         state.isCameraEnabled = own?.hasVideo ?? false
         state.isHandRaised = own?.hasHandRaised ?? false
         return .connected(state)

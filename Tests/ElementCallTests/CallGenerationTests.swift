@@ -80,6 +80,32 @@ struct CallGenerationTests {
     }
     
     @Test
+    func aCameraOffRequestSupersedesStartupPermission() async throws {
+        let transport = FakeMediaSession()
+        let media = MatrixRTCMediaSession(localMemberID: "me", mediaSession: transport, capturesCamera: false)
+        let controller = makeController(backend: HeldBackend())
+        let room = ElementCallFakeRoom()
+        let call = MatrixRTCCall(rtcCall: FakeRTCCall())
+        controller.setPreviewState(callData: .init(isAudioCall: false, isStartingCall: true),
+                                   room: room, connection: .connected, call: media, rtcCall: call)
+        let generation = controller.callGeneration
+        let permission = HeldReply<Bool>()
+        let publishing = Task {
+            await controller.publishMedia(on: media, rtcCall: call, room: room, prepareAudio: { },
+                                          cameraAccess: { await (try? permission.wait()) ?? false })
+        }
+        defer { permission.answer(true) }
+        try await waitUntil { permission.isPending }
+        await controller.setCameraEnabled(false, generation: generation)
+        permission.answer(true)
+        await publishing.value
+        #expect(!controller.isCameraEnabled)
+        #expect(!media.isCameraEnabled)
+        #expect(!transport.published.contains { $0.kind == .camera })
+        await media.disconnect()
+    }
+    
+    @Test
     func aLateSystemStartDoesNotOpenARoomForTheReplacement() async throws {
         let transport = HeldBackend()
         let system = HeldSystem()
@@ -360,7 +386,7 @@ struct CallGenerationTests {
         let stock = ElementCallStyle.stock
         let style = ElementCallStyle(theme: stock.theme, icons: stock.icons, avatars: stock.avatars, strings: strings)
         return ElementCallController(backend: backend, system: system,
-                                     options: .init(), style: style, logger: logger)
+                                     options: .init(), style: style, logger: logger, permissions: ElementCallFakeMediaPermissions())
     }
     
     private func replaceCall(_ controller: ElementCallController, in room: ElementCallFakeRoom) -> MatrixRTCCall {

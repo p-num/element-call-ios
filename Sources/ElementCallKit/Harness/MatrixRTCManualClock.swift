@@ -68,6 +68,13 @@ public final nonisolated class MatrixRTCManualClock: Clock, Sendable {
         now.offset
     }
     
+    /// When each task asleep on the clock is due, as an ``elapsed``. A test that advances past a
+    /// timer waits for it here first: a timer that starts after the advance sleeps from the new
+    /// time, and never fires.
+    var sleeperDeadlines: [Duration] {
+        state.withLock { $0.sleepers.map(\.deadline.offset) }
+    }
+    
     public func sleep(until deadline: Instant, tolerance: Duration?) async throws {
         let id = UUID()
         try await withTaskCancellationHandler {

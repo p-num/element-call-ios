@@ -26,6 +26,11 @@ public final class MatrixRTCCall {
     public let slotID: String
     /// Minted by the core at join time; what every event, roster entry and key report is keyed by.
     public let localMemberID: String
+    /// The generation of this device's current legacy join, before its first roster echo.
+    public let legacyJoinID: String?
+    /// Voice or video, as the join settled it: the intent we started the call with, else the one the
+    /// members already in it agree on. Start the camera for ``MatrixRTCCallIntent/video`` only.
+    public let intent: MatrixRTCCallIntent
     
     /// Who is in the call, from the core's membership projection, ourselves included.
     public private(set) var members: [MatrixRTCMembership] = []
@@ -68,6 +73,8 @@ public final class MatrixRTCCall {
         roomID = rtcCall.roomId()
         slotID = rtcCall.slotId()
         localMemberID = rtcCall.memberId()
+        legacyJoinID = rtcCall.legacyJoinId()
+        intent = MatrixRTCCallIntent(rtcCall.callIntent())
         status = MatrixRTCCallStatus(rtcCall.status())
         (statusUpdates, statusContinuation) = AsyncStream.makeStream(bufferingPolicy: .unbounded)
         playSounds(for: status)
@@ -110,6 +117,9 @@ public final class MatrixRTCCall {
     
     /// Each observer gets the current Matrix membership and subsequent changes. SFU reconnects
     /// do not imply departure, and multiple devices of one user remain separate memberships.
+    /// Includes the core's participation generation without taking the controller's single-reader
+    /// status or media streams. Raw membership inputs stay local; a host exporting correlation
+    /// sends only participation digests, with its usage-analytics consent.
     public func membershipSnapshots() -> AsyncStream<[MatrixRTCMembership]> {
         let id = UUID()
         return AsyncStream { continuation in
@@ -248,6 +258,36 @@ public final class MatrixRTCCall {
             MatrixRTCLog.warning("Failed to lower hand in \(roomID)/\(slotID): \(error)")
             throw MatrixRTCError.ffi("\(error)")
         }
+    }
+    
+    // MARK: - Reactions
+    
+    /// Returns once the reaction has landed. Throws inside the core's send cooldown, since peers
+    /// would drop a second reaction while the first still shows (009 R12), and when it has not landed
+    /// within five seconds, rather than delivering it late. Ours comes back as an event like
+    /// everyone else's, which is what shows it.
+    public func sendReaction(_ kind: MatrixRTCReactionKind) async throws {
+        do {
+            _ = try await rtcCall.sendReaction(emoji: kind.emoji, name: kind.name)
+            MatrixRTCLog.info("Reaction \(kind.name) sent in \(roomID)/\(slotID)")
+        } catch {
+            MatrixRTCLog.info("Reaction \(kind.name) not sent in \(roomID)/\(slotID): \(error)")
+            throw MatrixRTCError.ffi("\(error)")
+        }
+    }
+    
+    /// The end the core has reached, or nil while the call goes on: ``status`` once it has caught up,
+    /// and before that the core's own status, read now. The core's end can be waiting in the status
+    /// subscription, or in ``statusUpdates`` for a reader that has not run yet, while something
+    /// else already acts on the call; this is how that something sees it (044 C8).
+    package var reachedEnd: MatrixRTCEndReason? {
+        if case .ended(let reason) = status {
+            return reason
+        }
+        if case .ended(let reason) = MatrixRTCCallStatus(rtcCall.status()) {
+            return reason
+        }
+        return nil
     }
     
     private func updateStatus(_ status: MatrixRTCCallStatus) {

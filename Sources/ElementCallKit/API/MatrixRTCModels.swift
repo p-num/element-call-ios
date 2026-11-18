@@ -106,6 +106,22 @@ public nonisolated enum MatrixRTCMembershipFormat: String, Sendable, CaseIterabl
     case roomState
 }
 
+/// The codec video is published with (043 R15). What the device can encode is
+/// ``MatrixRTCClient/supportedVideoCodecs()``; a codec it cannot is published as ``auto``.
+public nonisolated enum MatrixRTCVideoCodec: String, Sendable, CaseIterable, Codable {
+    /// The transport's default, ``autoCodec``.
+    case auto
+    case vp8
+    case h264
+    case vp9
+    case av1
+    
+    /// What ``auto`` publishes: the core maps it to LiveKit's default, VP8
+    /// (`matrix-rtc-livekit/src/video_encoding.rs`, `video_publish_options`). The FFI documents it
+    /// but exposes no value, so it is stated here, once, and named in the picker (043 R15a).
+    public static let autoCodec: MatrixRTCVideoCodec = .vp8
+}
+
 public nonisolated enum MatrixRTCCallIntent: String, Sendable {
     case audio, video
 }
@@ -132,12 +148,38 @@ public nonisolated struct MatrixRTCLeaveReason: Sendable, Hashable {
     }
 }
 
+/// The core's evidence for one actual join, not a media connection or a membership event refresh.
+/// Keep this typed until the host derives its participation digest; these values are not analytics
+/// properties and must not be forwarded as raw identifiers or timestamps.
+public nonisolated enum MatrixRTCParticipationGeneration: Sendable, Hashable {
+    /// The member ID is fresh for this join and stable across refreshes.
+    case perJoinMemberID
+    /// A stable, random generation carried by one legacy join and its refreshes.
+    case legacyJoinID(String)
+    /// Legacy member IDs can be reused; the exact unsigned creation timestamp separates joins.
+    case legacy(createdTimestampMilliseconds: UInt64)
+    /// Neither supported generation is known. The host must keep correlation unbound.
+    case unavailable
+}
+
 public nonisolated struct MatrixRTCMembership: Sendable, Hashable, Identifiable {
     public let memberID: String
     public let userID: String
     public let deviceID: String?
     public let application: String?
+    public let participationGeneration: MatrixRTCParticipationGeneration
     
+    init(memberID: String, userID: String, deviceID: String?, application: String?,
+         participationGeneration: MatrixRTCParticipationGeneration = .unavailable) {
+        self.memberID = memberID
+        self.userID = userID
+        self.deviceID = deviceID
+        self.application = application
+        self.participationGeneration = participationGeneration
+    }
+    
+    /// Roster identity only. A legacy device can reuse it on a later join; correlation must also
+    /// include ``participationGeneration``, the call's room and slot, and this membership's sender.
     public var id: String {
         memberID
     }
@@ -507,6 +549,8 @@ public nonisolated enum MatrixRTCConnectionLossReason: Sendable, Hashable {
     case refused
     /// Never established within the budget from the connect request.
     case neverConnected
+    /// Our homeserver has no MSC4195 `get_token`, so no SFU token can be had. Never retried.
+    case tokenEndpointUnsupported
 }
 
 public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
@@ -534,6 +578,23 @@ public nonisolated enum MatrixRTCCallEvent: Sendable, Hashable {
 /// What the call does with the reactions it receives (037 R13).
 public nonisolated enum MatrixRTCReactionsMode: Sendable, Hashable {
     case off, withoutSound, withSound
+}
+
+/// One reaction we can send: an entry of Element Call's catalogue, which is the set and the order
+/// every client's picker shows (009 R11). `name` is the interoperable part, what a peer picks a
+/// sound by; `emoji` is what it shows.
+public nonisolated struct MatrixRTCReactionKind: Identifiable, Sendable, Hashable {
+    public let name: String
+    public let emoji: String
+    
+    public var id: String {
+        name
+    }
+    
+    public init(name: String, emoji: String) {
+        self.name = name
+        self.emoji = emoji
+    }
 }
 
 /// A reaction being shown: published once its spread delay is over, and dropped four seconds after
@@ -633,6 +694,11 @@ public nonisolated enum MatrixRTCError: Error, Sendable {
     case joinTimedOut
     /// The homeserver refused the join for good; `errorCode` is its Matrix `errcode` when it gave one.
     case joinRefused(errorCode: String?, reason: String)
+    /// The homeserver advertises no LiveKit transport of the room's format, so there is no media
+    /// server to publish on. `transportType` is the format's, for the logs.
+    case noLiveKitTransport(transportType: String)
+    /// Our homeserver has no MSC4195 `get_token`, so no media token can be had.
+    case tokenEndpointUnsupported
     case ffi(String)
     case media(String)
 }

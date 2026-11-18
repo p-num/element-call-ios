@@ -21,4 +21,24 @@ struct ProximityMonitoringTests {
         #expect(!ElementCallController.isProximityMonitored(isInCall: true, output: nil))
         #expect(!ElementCallController.isProximityMonitored(isInCall: false, output: .receiver))
     }
+    
+    @Test("A call turns the sensor on for the earpiece, and off once it leaves it or ends")
+    func callTogglesTheSensor() {
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: false, isInCall: true, output: .receiver) == true)
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: true, isInCall: true, output: .speaker) == false)
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: true, isInCall: false, output: .receiver) == false)
+    }
+    
+    @Test("A controller without a call leaves the sensor alone, whoever turned it on")
+    func idleControllerLeavesTheSensorAlone() {
+        // Another controller's earpiece call may have it on, and route changes reach every controller.
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: false, isInCall: false, output: .receiver) == nil)
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: false, isInCall: false, output: .speaker) == nil)
+    }
+    
+    @Test("A call whose output hasn't changed what it wants writes nothing")
+    func unchangedCallWritesNothing() {
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: true, isInCall: true, output: .receiver) == nil)
+        #expect(ElementCallController.proximityMonitoringChange(isMonitoring: false, isInCall: true, output: .speaker) == nil)
+    }
 }

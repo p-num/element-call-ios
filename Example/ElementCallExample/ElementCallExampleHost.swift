@@ -83,10 +83,16 @@ final class ElementCallExampleHost {
         notice = nil
         do {
             let playback = try ElementCallExampleScenarioPlayback(scenario: scenario.load())
+            let room = ElementCallFakeRoom(displayName: scenario.name)
+            // A membership, or the screen reads the call as not joined and never offers the hand
+            // or reactions however many people the scenario brings in.
+            let membership = MatrixRTCScriptedCall(roomID: room.roomID, status: .connected(since: .now, isDegraded: false))
+            Self.echoOwnActions(of: membership, into: playback, as: playback.player.session.localMemberID)
             let controller = ElementCallController.fake(connection: .connected,
-                                                        room: ElementCallFakeRoom(displayName: scenario.name),
+                                                        room: room,
                                                         connectedAt: .now,
-                                                        call: playback.player.call)
+                                                        call: playback.player.call,
+                                                        rtcCall: membership.call)
             controller.actions
                 .sink { [weak self] action in self?.handle(action) }
                 .store(in: &cancellables)
@@ -117,6 +123,11 @@ final class ElementCallExampleHost {
                 state.audioOutputs = ElementCallPreviewFixtures.headsetAudioOutputs
                 state.audioOutput = state.audioOutputs.first
             }
+            // Every fixture has developer mode on; this is the host that has not, so the settings
+            // menu offers Preferences alone (043 R4).
+            if ProcessInfo.processInfo.arguments.contains("-noDeveloperMode") {
+                state.isDeveloperModeEnabled = false
+            }
             // Built from the view state rather than defaulted, so the name on the bar and the name
             // in the top bar cannot drift apart. They agree today only by coincidence: the fake
             // room and `ElementCallPreviewFixtures.connected` happen to pick the same string.
@@ -139,6 +150,9 @@ final class ElementCallExampleHost {
             
         case .reactions(let reactions):
             openReactions(reactions, fixture: fixture)
+            
+        case .permissionProbe:
+            openPermissionProbe(fixture: fixture)
             
         case .connecting(let connection):
             let controller = makeController(connection: connection, room: ElementCallFakeRoom())
@@ -237,10 +251,18 @@ final class ElementCallExampleHost {
                 labFormat = lab.format
                 let room = SDKLabRoomContext(room: lab.room)
                 await room.load()
+                // The format is a preference now, not an option (043 R13): the Lab, which chose the
+                // session's, writes it where the call reads it, as any host controlling it would.
+                let preferences = ElementCallUserDefaultsPreferencesStore()
+                preferences.membershipFormat = lab.format
+                // Developer mode on: the Lab is where a developer checks a real call, with tile
+                // stats and the codec choice (043 R10, R15) reachable from the settings menu.
                 let controller = ElementCallController(backend: lab.backend,
                                                        system: ElementCallExampleLabSystem(),
-                                                       options: ElementCallOptions(membershipFormat: lab.format),
-                                                       logger: logger)
+                                                       options: ElementCallOptions(isDeveloperModeEnabled: true),
+                                                       logger: logger,
+                                                       preferences: preferences,
+                                                       analytics: ElementCallExampleLabAnalytics(logger: logger))
                 controller.actions
                     .sink { [weak self] action in self?.handle(action) }
                     .store(in: &cancellables)
@@ -317,6 +339,21 @@ final class ElementCallExampleHost {
             }
         } catch {
             notice = "Fixture \(fixture.rawValue) failed to load: \(error)"
+        }
+    }
+    
+    /// Our own hand and reactions come back from the room as everyone's do; here the scripted
+    /// session is the room. Without the hand, Raise hand closed More and raised nothing, and the
+    /// banner's Cancel could not lower a hand a scenario had raised.
+    private static func echoOwnActions(of membership: MatrixRTCScriptedCall,
+                                       into playback: ElementCallExampleScenarioPlayback,
+                                       as localMemberID: String) {
+        let room = playback.player.session
+        membership.onReactionSent = { emoji, name in
+            room.push(event: .reaction(memberId: localMemberID, emoji: emoji, name: name, sound: reactionSoundFor(name: name)))
+        }
+        membership.onHandRequested = { raised in
+            room.push(hasHandRaised: raised)
         }
     }
     
@@ -399,6 +436,7 @@ final class ElementCallExampleHost {
             let playback = try ElementCallExampleScenarioPlayback(scenario: MatrixRTCScenario.parse(ElementCallExampleReactions.scenario, name: fixture.rawValue),
                                                                   localMemberID: ElementCallExampleReactions.localMemberID,
                                                                   audioOf: scripted.call)
+            Self.echoOwnActions(of: scripted, into: playback, as: ElementCallExampleReactions.localMemberID)
             let controller = ElementCallController.fake(following: scripted.call,
                                                         room: room,
                                                         isAudioCall: false,
@@ -412,6 +450,35 @@ final class ElementCallExampleHost {
             ringingTask = Task {
                 await playback.start()
                 await reactions.play(tiles: playback)
+            }
+        } catch {
+            notice = "Fixture \(fixture.rawValue) failed to load: \(error)"
+        }
+    }
+    
+    /// fixtures.md's `permission_probe`: a video call with Bob through the real controller, so the
+    /// microphone gate, the failure screen and the camera's explanation run as they ship, over the
+    /// system's own dialogs. Reset the answers with `xcrun simctl privacy booted reset all <bundle id>`.
+    private func openPermissionProbe(fixture: ElementCallExampleFixture) {
+        do {
+            let room = ElementCallFakeRoom(displayName: fixture.title,
+                                           isDirect: true,
+                                           memberProfiles: ["@bob:example.com": ElementCallMemberProfile(userID: "@bob:example.com", displayName: "Bob", avatarURL: nil)])
+            let scripted = MatrixRTCScriptedCall(roomID: room.roomID, status: .connected(since: .now, isDegraded: false))
+            let playback = try ElementCallExampleScenarioPlayback(scenario: MatrixRTCScenario.parse("0s BOBv", name: fixture.rawValue),
+                                                                  localMemberID: ElementCallExampleOutage.localMemberID,
+                                                                  audioOf: scripted.call)
+            let controller = ElementCallController.permissionProbe(following: scripted.call, call: playback.player.call)
+            controller.actions
+                .sink { [weak self] action in self?.handle(action) }
+                .store(in: &cancellables)
+            let viewModel = ElementCallScreenViewModel(controller: controller)
+            playback.attach(context: viewModel.context, controller: controller)
+            session = Session(fixture: fixture, presentation: .scripted(viewModel, playback), controller: controller)
+            controller.startCall(ElementCallData(isAudioCall: false, isStartingCall: true), room: room)
+            ringingTask = Task {
+                await playback.start()
+                await playback.step()
             }
         } catch {
             notice = "Fixture \(fixture.rawValue) failed to load: \(error)"

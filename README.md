@@ -126,6 +126,29 @@ sends the moment the server is back. Without it the call notices at its next sen
 
 Every port has a fake shipped alongside it, so previews and tests need no host at all.
 
+### Membership correlation and analytics
+
+`controller.rtcCall?.membershipSnapshots()` gives each observer the current authoritative Matrix
+membership and ordered updates, including empty sets, without consuming the controller's status or
+media streams. `MatrixRTCMembership.participationGeneration` carries the core's evidence for one join.
+The core uses a fresh member ID for MSC calls and an explicit join ID for legacy room-state calls.
+If a room-state peer omits the join ID, the core uses its creation timestamp as an exact `UInt64`,
+including zero. Missing or malformed evidence leaves participation unbound. A membership refresh
+keeps the generation. A legacy rejoin can reuse `memberID` with a new generation. Use `id` for roster
+identity and include `participationGeneration` when you correlate joins. For the local legacy join,
+`MatrixRTCCall.legacyJoinID` is available before the first roster echo.
+
+Keep the raw room, slot, sender, member and generation inputs local. A consenting host derives the
+versioned participation digest and emits only digests for session binding and overlap edges. An
+unavailable generation stays unbound, and an empty snapshot establishes no overlap. These digests are
+provisional graph roots, not immutable global call IDs. This package adds no network sender or
+signaling field. `CallJoinAttempted`, `CallJoinOutcome`, `CallFailure` and `CallParticipationEnded`
+retain their upstream names and properties; forward them unchanged through `ElementCallAnalyticsProtocol`.
+
+The mapper uses `JoinedMembership.membershipTs`, `JoinedMembership.legacyJoinId`, and
+`FfiMembershipIdentityKind` from the RTC Swift bindings. When updating the RTC pin, use generated
+bindings and an XCFramework from the same build. Record the resolved revision in `Package.resolved`.
+
 ### Theming, and why it is a port
 
 Colours and fonts are **computed properties read at draw time**, never captured once. Element's design

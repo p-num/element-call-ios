@@ -30,9 +30,9 @@ final class PreferencesUITests: XCTestCase {
     }
     
     private func openPreferences() {
-        let more = app.buttons["elementCall.more"]
-        XCTAssertTrue(more.waitForExistence(timeout: 5), "The overflow button should be in the top bar.")
-        more.tap()
+        let settings = app.buttons["elementCall.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5), "The settings button should be in the top bar.")
+        settings.tap()
         let item = app.buttons["elementCall.preferences"]
         XCTAssertTrue(item.waitForExistence(timeout: 3), "The menu should offer Preferences.")
         item.tap()
@@ -58,34 +58,50 @@ final class PreferencesUITests: XCTestCase {
         XCTAssertGreaterThan(uncovered, 0, "The sheet should leave some of the call in view.")
         app.coordinate(withNormalizedOffset: .zero).withOffset(CGVector(dx: app.frame.width * 0.3, dy: uncovered / 2)).tap()
         XCTAssertFalse(app.buttons["elementCall.preferences.close"].waitForExistence(timeout: 2), "A tap outside should close it.")
-        XCTAssertTrue(app.buttons["elementCall.more"].isHittable, "The stage should be where it was, not full screen.")
+        XCTAssertTrue(app.buttons["elementCall.settings"].isHittable, "The stage should be where it was, not full screen.")
         XCTAssertFalse(app.buttons["elementCall.exitFullscreen"].exists, "The tap should not have reached a tile.")
     }
     
-    /// R13: the three choices, and the one picked is what the row then says.
-    func testTheReactionsSettingOffersThreeChoices() {
-        openPreferences()
-        let picker = app.buttons["elementCall.preferences.reactions"]
-        XCTAssertTrue(picker.waitForExistence(timeout: 3))
-        picker.tap()
-        for choice in ["On", "Silent", "Off"] {
-            XCTAssertTrue(app.buttons[choice].waitForExistence(timeout: 2), "\(choice) should be offered.")
-        }
-        app.buttons["Silent"].tap()
-        XCTAssertTrue(picker.waitForExistence(timeout: 2))
-        XCTAssertTrue(picker.label.contains("Silent") || (picker.value as? String)?.contains("Silent") == true,
-                      "The row should show the choice made.")
+    /// 043 R2, R3: the button is Settings to a screen reader, and its menu ends with Preferences, then
+    /// Developer options in developer mode, which every fixture has.
+    func testTheSettingsMenuOffersPreferencesThenDeveloperOptions() {
+        let settings = app.buttons["elementCall.settings"]
+        XCTAssertTrue(settings.waitForExistence(timeout: 5))
+        XCTAssertEqual(settings.label, "Settings")
+        settings.tap()
+        let preferences = app.buttons["elementCall.preferences"]
+        let developerOptions = app.buttons["elementCall.developerOptions"]
+        XCTAssertTrue(preferences.waitForExistence(timeout: 3))
+        XCTAssertTrue(developerOptions.waitForExistence(timeout: 3))
+        XCTAssertLessThan(preferences.frame.minY, developerOptions.frame.minY, "Preferences should come first.")
     }
     
-    /// R16: the developer options' section holds the stats overlay's toggle.
-    func testDeveloperOptionsTogglesTheStatsOverlay() {
-        XCTAssertFalse(anyTileStats.exists, "No overlay before it is asked for.")
+    /// 043 R6, R7: two switches; with reactions hidden the sound one is greyed and keeps its position.
+    func testHidingReactionsGreysTheSoundSwitchWithoutMovingIt() {
         openPreferences()
-        let toggle = app.switches["elementCall.preferences.tileStats"]
-        XCTAssertTrue(toggle.waitForExistence(timeout: 3), "Developer mode is on in the fixtures.")
-        // On the switch itself, at the row's trailing end: the middle of the row is its label.
-        toggle.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
-        XCTAssertTrue(anyTileStats.waitForExistence(timeout: 3), "Turning it on should draw the overlay.")
+        let show = app.switches["elementCall.preferences.showReactions"]
+        let sounds = app.switches["elementCall.preferences.playReactionSounds"]
+        XCTAssertTrue(show.waitForExistence(timeout: 3))
+        XCTAssertTrue(sounds.exists)
+        XCTAssertEqual(sounds.value as? String, "1")
+        XCTAssertTrue(sounds.isEnabled)
+        
+        show.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertEqual(show.value as? String, "0")
+        XCTAssertFalse(sounds.isEnabled, "The sound switch should be greyed while reactions are hidden.")
+        XCTAssertEqual(sounds.value as? String, "1", "It should keep the position the user left it in.")
+        
+        show.coordinate(withNormalizedOffset: CGVector(dx: 0.95, dy: 0.5)).tap()
+        XCTAssertTrue(sounds.isEnabled)
+        XCTAssertEqual(sounds.value as? String, "1")
+    }
+    
+    /// 043 R9: tile stats have moved to Developer options.
+    func testPreferencesHasNoDeveloperSection() {
+        openPreferences()
+        XCTAssertTrue(app.switches["elementCall.preferences.showReactions"].waitForExistence(timeout: 3))
+        XCTAssertFalse(app.switches["elementCall.developerOptions.tileStats"].exists)
+        XCTAssertFalse(app.staticTexts["Tile stats"].exists)
     }
     
     /// R17: what a bug report quotes, for everyone.

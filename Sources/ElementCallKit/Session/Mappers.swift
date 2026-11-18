@@ -39,6 +39,28 @@ nonisolated extension MatrixRTCMembershipFormat {
     }
 }
 
+nonisolated extension MatrixRTCVideoCodec {
+    var ffi: FfiVideoCodecPreference {
+        switch self {
+        case .auto: .auto
+        case .vp8: .vp8
+        case .h264: .h264
+        case .vp9: .vp9
+        case .av1: .av1
+        }
+    }
+    
+    init(_ ffi: FfiVideoCodecPreference) {
+        self = switch ffi {
+        case .auto: .auto
+        case .vp8: .vp8
+        case .h264: .h264
+        case .vp9: .vp9
+        case .av1: .av1
+        }
+    }
+}
+
 nonisolated extension MatrixRTCCallKind {
     var ffi: FfiCallKind {
         switch self {
@@ -100,12 +122,22 @@ nonisolated extension MatrixRTCEndReason {
     }
 }
 
+nonisolated extension MatrixRTCCallIntent {
+    init(_ intent: FfiCallIntent) {
+        switch intent {
+        case .audio: self = .audio
+        case .video: self = .video
+        }
+    }
+}
+
 nonisolated extension MatrixRTCConnectionLossReason {
     init(_ reason: FfiConnectionLossReason) {
         switch reason {
         case .budget: self = .budget
         case .refused: self = .refused
         case .neverConnected: self = .neverConnected
+        case .tokenEndpointUnsupported: self = .tokenEndpointUnsupported
         }
     }
     
@@ -114,6 +146,7 @@ nonisolated extension MatrixRTCConnectionLossReason {
         case .budget: .budget
         case .refused: .refused
         case .neverConnected: .neverConnected
+        case .tokenEndpointUnsupported: .tokenEndpointUnsupported
         }
     }
 }
@@ -194,10 +227,25 @@ private nonisolated extension Date {
 
 nonisolated extension MatrixRTCMembership {
     init(_ membership: JoinedMembership) {
+        let generation: MatrixRTCParticipationGeneration
+        switch membership.identityKind {
+        case .perJoinMemberId:
+            generation = .perJoinMemberID
+        case .legacyJoinId:
+            generation = membership.legacyJoinId.flatMap { joinID in
+                joinID.utf8.count == 32 && joinID.utf8.allSatisfy { (48...57).contains($0) || (97...102).contains($0) }
+                    ? .legacyJoinID(joinID) : nil
+            } ?? .unavailable
+        case .legacyMembershipTimestamp:
+            generation = membership.membershipTs.map { .legacy(createdTimestampMilliseconds: $0) } ?? .unavailable
+        case .unavailable:
+            generation = .unavailable
+        }
         self.init(memberID: membership.memberId,
                   userID: membership.sender,
                   deviceID: membership.senderDeviceId,
-                  application: membership.application)
+                  application: membership.application,
+                  participationGeneration: generation)
     }
 }
 
@@ -341,4 +389,10 @@ nonisolated extension MatrixRTCCallEvent {
             self = .ownMediaConnectionDegraded(degraded)
         }
     }
+}
+
+public nonisolated extension MatrixRTCReactionKind {
+    /// Read from the core rather than copied, so a reaction the core adds reaches the picker with no
+    /// edit here, in the place web shows it.
+    static let catalogue: [MatrixRTCReactionKind] = reactionCatalog().map { MatrixRTCReactionKind(name: $0.name, emoji: $0.emoji) }
 }

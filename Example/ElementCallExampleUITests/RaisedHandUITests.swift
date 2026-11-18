@@ -7,13 +7,14 @@
 
 import XCTest
 
-/// The raise hand button, driven by real touches (spec 009).
+/// The raise hand control, driven by real touches (spec 009).
 ///
 /// Whether it is offered, what it shows and where a hand is drawn are `RaisedHandTests`, in
-/// process. What is here is what only a touch can answer: whether the button
-/// in the bar takes the tap over the stage beneath it, in portrait, in landscape and in the
-/// full-screen controls (009 R16, R30), and whether that tap stops at the button rather than also
-/// reaching the tile behind or the full-screen chrome's own tap.
+/// process. What is here is what only a touch can answer: whether the bar's `…` and the More
+/// sheet's hand row take their taps over the stage beneath, in portrait, in landscape and in the
+/// full-screen controls (009 R16, R30), and whether those taps stop there rather than also
+/// reaching the tile behind or the full-screen chrome's own tap. In `group` the hand shares the
+/// sheet with reactions, so it is never a button of its own in the bar.
 final class RaisedHandUITests: XCTestCase {
     private var app: XCUIApplication!
     
@@ -39,8 +40,18 @@ final class RaisedHandUITests: XCTestCase {
         app.otherElements["elementCall.tile.@\(user):example.com:DEVICE"]
     }
     
-    private var handButton: XCUIElement {
+    private var moreButton: XCUIElement {
+        app.buttons["elementCall.controlsMore"]
+    }
+    
+    /// The More sheet's row, which exists only while the sheet is up.
+    private var handRow: XCUIElement {
         app.buttons["elementCall.raisedHand"]
+    }
+    
+    /// The banner's Cancel, which is in the bar for as long as our hand is up (009 R2).
+    private var bannerCancel: XCUIElement {
+        app.buttons["elementCall.lowerHand"]
     }
     
     /// The badge on our own tile, found by what VoiceOver hears, which is also the proof that it
@@ -58,32 +69,43 @@ final class RaisedHandUITests: XCTestCase {
         return XCTWaiter().wait(for: [hittable], timeout: timeout) == .completed
     }
     
-    private func waitForLabel(_ label: String, on element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
-        let matches = expectation(for: NSPredicate(format: "label == %@", label), evaluatedWith: element)
-        return XCTWaiter().wait(for: [matches], timeout: timeout) == .completed
+    private func waitUntilGone(_ element: XCUIElement, timeout: TimeInterval = 5) -> Bool {
+        let gone = expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: element)
+        return XCTWaiter().wait(for: [gone], timeout: timeout) == .completed
     }
     
-    /// Raises, then lowers, and checks both our tile and the button agree each time.
+    /// `…`, then the hand row, which says what it will do and closes the sheet once tapped.
+    private func tapHandRow(expecting label: String) {
+        XCTAssertTrue(waitUntilHittable(moreButton), "the `…` is in the bar and can be tapped")
+        moreButton.tap()
+        XCTAssertTrue(waitUntilHittable(handRow), "the tap opened the More sheet")
+        XCTAssertEqual(handRow.label, label)
+        handRow.tap()
+        XCTAssertTrue(waitUntilGone(handRow), "the row closes the sheet")
+    }
+    
+    private func raise() {
+        tapHandRow(expecting: "Raise hand")
+        XCTAssertTrue(waitUntilHittable(bannerCancel), "the tap reached the row and the banner says so")
+    }
+    
+    /// Raises, then lowers through the same row, and checks our tile agrees each time.
     private func raiseAndLower() {
-        XCTAssertTrue(waitUntilHittable(handButton), "the hand button is in the bar and can be tapped")
-        XCTAssertEqual(handButton.label, "Raise hand")
-        
-        handButton.tap()
-        XCTAssertTrue(waitForLabel("Lower hand", on: handButton), "the tap reached the button")
+        raise()
         XCTAssertTrue(ourHand.waitForExistence(timeout: 2), "and our tile shows the hand")
         
-        handButton.tap()
-        XCTAssertTrue(waitForLabel("Raise hand", on: handButton), "the same button lowers it (009 R2)")
+        tapHandRow(expecting: "Lower hand")
+        XCTAssertTrue(waitUntilGone(bannerCancel), "the same row lowers it (009 R2)")
         XCTAssertFalse(ourHand.exists)
     }
     
-    func testTheHandButtonRaisesAndLowersOurHand() {
+    func testTheHandRowRaisesAndLowersOurHand() {
         launch("group")
         raiseAndLower()
     }
     
     /// Landscape starts with the chrome away and a tap on the stage brings it (014 R10, R14).
-    func testTheHandButtonWorksInLandscape() {
+    func testTheHandRowWorksInLandscape() {
         launch("group", orientation: .landscapeLeft)
         let window = app.windows.firstMatch
         let deadline = Date().addingTimeInterval(5)
@@ -100,33 +122,33 @@ final class RaisedHandUITests: XCTestCase {
     }
     
     /// The bar floats over the grid, and a button over the stage's content has lost its taps to the
-    /// tile beneath before (AGENTS, "interactive glass"). A tap that went through would have done
-    /// nothing visible to the button and might have opened a tile instead.
-    func testATapOnTheHandButtonStaysOffTheStage() {
+    /// tile beneath before (AGENTS, "interactive glass"), as has a sheet's row to what is under the
+    /// sheet. A tap that went through would have opened a tile instead.
+    func testTheTapsThatRaiseTheHandStayOffTheStage() {
         launch("group")
-        XCTAssertTrue(waitUntilHittable(handButton))
         
-        handButton.tap()
+        raise()
         
-        XCTAssertTrue(waitForLabel("Lower hand", on: handButton))
         XCTAssertTrue(tile("dan").exists, "still the stage, not one tile full screen")
         XCTAssertFalse(exitButton.exists)
     }
     
-    /// The full-screen controls are the same bar over a picture that toggles the chrome on a tap. A
-    /// tap on the hand button has to be the button's alone: the chrome stays up (009 R30).
-    func testTheHandButtonWorksInTheFullScreenControls() {
+    /// The full-screen controls are the same bar over a picture that toggles the chrome on a tap.
+    /// Each tap — `…`, the row, the banner's Cancel — has to be its own: the chrome stays up
+    /// (009 R30). Bob's picture hides our tile, so the banner is what says the hand is up.
+    func testTheHandWorksInTheFullScreenControls() {
         launch("group")
         let bob = tile("bob")
         XCTAssertTrue(bob.waitForExistence(timeout: 10))
         bob.doubleTap()
         bob.tap()
         XCTAssertTrue(exitButton.waitForExistence(timeout: 3), "the chrome is up")
-        XCTAssertTrue(waitUntilHittable(handButton))
         
-        handButton.tap()
-        
-        XCTAssertTrue(waitForLabel("Lower hand", on: handButton), "the tap reached the button")
+        raise()
         XCTAssertTrue(exitButton.exists, "and not the picture behind it, which would have put the chrome away")
+        
+        bannerCancel.tap()
+        XCTAssertTrue(waitUntilGone(bannerCancel), "the banner's Cancel lowers the hand")
+        XCTAssertTrue(exitButton.exists, "and that tap was the banner's alone")
     }
 }

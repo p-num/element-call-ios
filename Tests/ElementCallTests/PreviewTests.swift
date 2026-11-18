@@ -131,7 +131,7 @@ struct PreviewTests {
                                              testName: sanitizedSuiteName,
                                              traits: traits,
                                              preferences: preferences) {
-                Issue.record(Comment(rawValue: failure))
+                Issue.record(SnapshotFailure(suite: sanitizedSuiteName, message: failure), Comment(rawValue: failure))
             }
         }
     }
@@ -158,11 +158,13 @@ struct PreviewTests {
                                  testName: String = #function,
                                  traits: UITraitCollection = .init(),
                                  preferences: SnapshotPreferences) -> String? {
-        // The flat fallback rather than glass, and still sound waves rather than a frame of ripples:
-        // see `elementCallGlassEnabled` and `elementCallSoundWavesRipple`.
+        // The flat fallback rather than glass, still sound waves rather than a frame of ripples, and
+        // a still spinner: see `elementCallGlassEnabled`, `elementCallSoundWavesRipple` and
+        // `elementCallSpinnerTurns`.
         let view = AnyView(view
             .environment(\.elementCallGlassEnabled, false)
-            .environment(\.elementCallSoundWavesRipple, false))
+            .environment(\.elementCallSoundWavesRipple, false)
+            .environment(\.elementCallSpinnerTurns, false))
         let matchingView = isScreen ? AnyView(view) : AnyView(view
             .frame(width: device.size?.width)
             .fixedSize(horizontal: false, vertical: true))
@@ -175,6 +177,25 @@ struct PreviewTests {
                            named: name,
                            testName: testName)
         }
+    }
+}
+
+/// A snapshot that did not match, or was recorded, as the issue itself rather than its comment.
+///
+/// An error rather than a comment because Swift Testing prints a comment on a line of its own,
+/// beneath a bare "Issue recorded", and `xcbeautify` keeps only the issue's line for CI's
+/// annotations. An error's description is on that line, so the annotation names the image and what
+/// happened to it. The library's full message, with the paths of both images, stays as the comment,
+/// for Xcode and the result bundle.
+private struct SnapshotFailure: Error, CustomStringConvertible {
+    let suite: String
+    let message: String
+    
+    /// The library's first line names the image and says what happened: it differs, it had no
+    /// reference, or it was recorded.
+    var description: String {
+        let summary = message.split(separator: "\n").first { !$0.trimmingCharacters(in: .whitespaces).isEmpty }
+        return "\(suite): \(summary.map(String.init) ?? message)"
     }
 }
 

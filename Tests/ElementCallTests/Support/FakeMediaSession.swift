@@ -21,10 +21,13 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
     private let events: AsyncStream<FfiCallEvent>
     private let eventsContinuation: AsyncStream<FfiCallEvent>.Continuation
     private let heldPublishKind: FfiStreamKind?
+    /// What every publish throws, after it is recorded (044 C6).
+    private let publishError: (any Error)?
     
-    init(holdingPublish kind: FfiStreamKind? = nil) {
+    init(holdingPublish kind: FfiStreamKind? = nil, publishError: (any Error)? = nil) {
         (events, eventsContinuation) = AsyncStream.makeStream()
         heldPublishKind = kind
+        self.publishError = publishError
     }
     
     func send(_ event: FfiCallEvent) {
@@ -101,6 +104,9 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
             try await withCheckedThrowingContinuation { continuation in
                 state.withLock { $0.pendingPublish = continuation }
             }
+        }
+        if let publishError {
+            throw publishError
         }
         return FfiLocalTrack(noPointer: .init())
     }
@@ -183,6 +189,10 @@ final class FakeMediaSession: MediaSessionProtocol, @unchecked Sendable {
     }
     
     func participants() -> [FfiParticipant] {
+        []
+    }
+    
+    func unverifiedParticipants() -> [String] {
         []
     }
     

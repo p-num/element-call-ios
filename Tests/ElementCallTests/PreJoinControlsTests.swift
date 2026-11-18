@@ -42,7 +42,8 @@ struct PreJoinControlsTests {
                                                options: ElementCallOptions(isDeveloperModeEnabled: true,
                                                                            isScreenSharingEnabled: true),
                                                style: .stock,
-                                               logger: nil)
+                                               logger: nil,
+                                               permissions: ElementCallFakeMediaPermissions())
         controller.setPreviewState(callData: .init(isAudioCall: isAudioCall, isStartingCall: true),
                                    room: ElementCallFakeRoom(),
                                    connection: .joining)
@@ -65,8 +66,19 @@ struct PreJoinControlsTests {
         #expect(isMuted)
     }
     
-    /// Only the disabling direction. Enabling goes through `AVCaptureDevice.requestAccess`, which
-    /// nothing in process can answer for, whereas `if enabled, ...` skips that branch entirely here.
+    /// Enabling, through the faked permissions `fake(...)` grants: no prompt, and the intent holds.
+    @Test
+    func turningTheCameraOnBeforeTheCallExistsIsRemembered() async throws {
+        let controller = ElementCallController.fake(connection: .joining, isAudioCall: true)
+        #expect(!controller.isCameraEnabled)
+        let enabled = deferFulfillment(values { controller.isCameraEnabled }) { $0 }
+        
+        controller.setCameraEnabled(true)
+        
+        let isEnabled = try await enabled.fulfill()
+        #expect(isEnabled)
+    }
+    
     @Test
     func turningTheCameraOffBeforeTheCallExistsIsRemembered() async throws {
         let controller = ElementCallController.fake(connection: .joining)
@@ -77,6 +89,35 @@ struct PreJoinControlsTests {
         
         let isEnabled = try await disabled.fulfill()
         #expect(!isEnabled)
+    }
+    
+    /// Joining from a room's call button asks for video, because the button cannot know what is in
+    /// progress; the core does, and a voice call has to join with the camera off.
+    @Test
+    func aVoiceCallJoinsWithTheCameraOff() {
+        let (controller, _) = makeJoiningController()
+        #expect(controller.isCameraEnabled)
+        
+        controller.adoptIntent(.audio)
+        
+        #expect(!controller.isCameraEnabled)
+    }
+    
+    /// The control: a video call keeps the camera the join asked for.
+    @Test
+    func aVideoCallJoinsWithTheCameraOn() {
+        let (controller, _) = makeJoiningController()
+        
+        controller.adoptIntent(.video)
+        
+        #expect(controller.isCameraEnabled)
+    }
+    
+    /// What the controller reads the intent from: the core's, as the join settled it.
+    @Test
+    func theCallReportsTheIntentTheJoinSettledOn() {
+        #expect(MatrixRTCCall(rtcCall: FakeRTCCall(intent: .audio)).intent == .audio)
+        #expect(MatrixRTCCall(rtcCall: FakeRTCCall(intent: .video)).intent == .video)
     }
     
     /// The system call UI is the other way in -- the lock screen, or the CallKit banner -- and a

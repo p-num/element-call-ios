@@ -40,7 +40,6 @@ struct DeveloperModeTests {
         let options = ElementCallOptions()
         
         #expect(options.isPictureInPictureEnabled)
-        #expect(options.membershipFormat == .roomState)
         #expect(!options.isDeveloperModeEnabled)
         #expect(!options.isScreenSharingEnabled)
         #expect(!options.isAutomaticPictureInPictureForAudioCallsEnabled)

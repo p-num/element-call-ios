@@ -229,16 +229,16 @@ struct SmallCallRaisedHandTests {
     }
 }
 
-/// Mic, camera, audio, the hand and hang-up are the bar a host ships with screen share off, which
-/// Element X does. The next control has to bring the `…` sheet with it rather than clip the bar on
-/// the smallest phone (009 R17).
+/// The fullest bar is mic, camera, audio, `…` and hang-up. Anything more goes behind the `…`
+/// rather than clip the bar on the smallest phone (009 R17), so a sixth control is a sign that
+/// rule was broken.
 @Suite("Control bar length")
 @MainActor
 struct ControlBarLengthTests {
     static let smallestPhoneShortSide: CGFloat = 375
     
     @Test(arguments: [Axis.horizontal, .vertical])
-    func theShippedBarFitsTheSmallestPhone(axis: Axis) {
+    func theFullestBarFitsTheSmallestPhone(axis: Axis) {
         #expect(ElementCallControlsView.length(controls: 5, along: axis) <= Self.smallestPhoneShortSide)
     }
 }
