@@ -139,7 +139,7 @@ final class FakeRTCCall: RtcCallProtocol, Sendable {
     func legacyJoinId() -> String? {
         ownLegacyJoinID
     }
-
+    
     func isLive() -> Bool {
         true
     }

@@ -55,7 +55,7 @@ struct MembershipGenerationTests {
         #expect(call.members.isEmpty)
         #expect(call.legacyJoinID == joinID)
     }
-
+    
     @Test
     func independentObserversReceiveGenerationChangesIncludingEmptySnapshots() async {
         let call = MatrixRTCCall(rtcCall: FakeRTCCall())
