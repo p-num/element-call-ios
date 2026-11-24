@@ -18,8 +18,8 @@ let package = Package(
         .library(name: "ElementCallUI", targets: ["ElementCallUI"])
     ],
     dependencies: [
-        .package(url: "https://github.com/p-num/matrix-rust-rtc", exact: "0.5.0-rc.11-letro.1"),
-        // .package(path: "../matrix-rust-rtc"),
+        .package(url: "https://git.postnumber.com/letro/letro-rust-rtc", revision: "8279fb0c0a6d22802de83ca80ceebcec62bce851"),
+        // .package(path: "../letro-rust-rtc"),
         // The design *tokens*, not the Compound component library. Tokens are static values in
         // their own small package, so depending on them is safe. Compound itself is not, because its
         // colours live on a shared instance a host re-brands at runtime: a second copy linked in
@@ -36,7 +36,7 @@ let package = Package(
     ],
     targets: [
         .target(name: "ElementCallKit",
-                dependencies: [.product(name: "MatrixRtc", package: "matrix-rust-rtc")],
+                dependencies: [.product(name: "MatrixRtc", package: "letro-rust-rtc")],
                 // Copied rather than processed: the files are Element Call web's, byte for byte, and
                 // Sounds/README.md pins them by hash.
                 resources: [.copy("Sounds")],
@@ -45,7 +45,7 @@ let package = Package(
         // MatrixBackend, which the host implements, and the fakes implement it too.
         .target(name: "ElementCallHost",
                 dependencies: ["ElementCallKit",
-                               .product(name: "MatrixRtc", package: "matrix-rust-rtc"),
+                               .product(name: "MatrixRtc", package: "letro-rust-rtc"),
                                .product(name: "CompoundDesignTokens", package: "compound-design-tokens")],
                 // The call screen's strings, downloaded from Localazy by scripts/download-strings.sh.
                 // Here rather than in the UI because ElementCallStrings, whose defaults they are, is a port.
@@ -62,7 +62,7 @@ let package = Package(
                 dependencies: ["ElementCallKit",
                                "ElementCallHost",
                                "ElementCallUI",
-                               .product(name: "MatrixRtc", package: "matrix-rust-rtc")],
+                               .product(name: "MatrixRtc", package: "letro-rust-rtc")],
                 swiftSettings: [.defaultIsolation(MainActor.self)]),
         .testTarget(name: "ElementCallTests",
                     dependencies: ["ElementCall",

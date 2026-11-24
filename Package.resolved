@@ -1,5 +1,5 @@
 {
-  "originHash" : "ca298d54f6322dfb14a8a4de6d5184274792172dd328c18345799a9c12e9b50d",
+  "originHash" : "0e343d86bcc35a6987aa9301f3aa07ca06ebdd30ef1f190d656ca1a0c737b793",
   "pins" : [
     {
       "identity" : "compound-design-tokens",
@@ -11,12 +11,11 @@
       }
     },
     {
-      "identity" : "matrix-rust-rtc",
+      "identity" : "letro-rust-rtc",
       "kind" : "remoteSourceControl",
-      "location" : "https://github.com/p-num/matrix-rust-rtc",
+      "location" : "https://git.postnumber.com/letro/letro-rust-rtc",
       "state" : {
-        "revision" : "42a498c51afd811714323719e2fb802fa244418d",
-        "version" : "0.5.0-rc.11-letro.1"
+        "revision" : "8279fb0c0a6d22802de83ca80ceebcec62bce851"
       }
     },
     {
